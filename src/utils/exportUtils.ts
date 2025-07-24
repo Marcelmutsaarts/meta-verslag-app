@@ -1,4 +1,6 @@
-import { Document, Packer, Paragraph, TextRun, Table, TableCell, TableRow, HeadingLevel, AlignmentType } from 'docx'
+import { Document, Packer, Paragraph, TextRun, Table, TableCell, TableRow, HeadingLevel, AlignmentType, LevelFormat } from 'docx'
+import jsPDF from 'jspdf'
+import html2canvas from 'html2canvas'
 
 interface AssignmentData {
   title: string
@@ -28,41 +30,51 @@ export function htmlToWordElements(html: string): TextRun[] {
   
   const elements: TextRun[] = []
   
-  function processNode(node: Node): void {
+  function processNode(node: Node, parentFormatting: { bold?: boolean, italics?: boolean, underline?: boolean } = {}): void {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent || ''
       if (text.trim()) {
-        elements.push(new TextRun({ text, size: 24 }))
+        elements.push(new TextRun({ 
+          text, 
+          size: 24,
+          bold: parentFormatting.bold,
+          italics: parentFormatting.italics,
+          underline: parentFormatting.underline ? {} : undefined
+        }))
       }
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element
       const tagName = element.tagName.toLowerCase()
-      const textContent = element.textContent || ''
+      
+      const formatting = { ...parentFormatting }
       
       switch (tagName) {
         case 'strong':
         case 'b':
-          elements.push(new TextRun({ text: textContent, bold: true, size: 24 }))
+          formatting.bold = true
+          node.childNodes.forEach(child => processNode(child, formatting))
           break
         case 'em':
         case 'i':
-          elements.push(new TextRun({ text: textContent, italics: true, size: 24 }))
+          formatting.italics = true
+          node.childNodes.forEach(child => processNode(child, formatting))
           break
         case 'u':
-          elements.push(new TextRun({ text: textContent, underline: {}, size: 24 }))
+          formatting.underline = true
+          node.childNodes.forEach(child => processNode(child, formatting))
           break
         case 'br':
           elements.push(new TextRun({ text: '\n', size: 24 }))
           break
         case 'p':
-          if (node.childNodes.length > 0) {
-            node.childNodes.forEach(child => processNode(child))
+          node.childNodes.forEach(child => processNode(child, formatting))
+          if (elements.length > 0 && (elements[elements.length - 1] as any).text !== '\n') {
             elements.push(new TextRun({ text: '\n', size: 24 }))
           }
           break
         default:
-          // For other elements, process their children
-          node.childNodes.forEach(child => processNode(child))
+          // For other elements, process their children with current formatting
+          node.childNodes.forEach(child => processNode(child, formatting))
       }
     }
   }
@@ -135,6 +147,42 @@ export function splitHtmlByTables(html: string): Array<{ type: 'text' | 'table',
 // Create Word document with rich content
 export async function createWordDocument(assignmentData: AssignmentData): Promise<Blob> {
   const doc = new Document({
+    numbering: {
+      config: [
+        {
+          reference: "my-numbering",
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.DECIMAL,
+              text: "%1.",
+              alignment: AlignmentType.LEFT,
+              style: {
+                paragraph: {
+                  indent: { left: 720, hanging: 260 },
+                },
+              },
+            },
+          ],
+        },
+        {
+          reference: "my-bullet-points",
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.BULLET,
+              text: "•",
+              alignment: AlignmentType.LEFT,
+              style: {
+                paragraph: {
+                  indent: { left: 720, hanging: 260 },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
     sections: [{
       properties: {},
       children: [
@@ -222,8 +270,8 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                 const tempDiv = document.createElement('div')
                 tempDiv.innerHTML = htmlContent
                 
-                // Process each child element
-                tempDiv.childNodes.forEach(node => {
+                // Process HTML content more robustly
+                const processHtmlElement = (node: Node): void => {
                   if (node.nodeType === Node.ELEMENT_NODE) {
                     const element = node as Element
                     const tagName = element.tagName.toLowerCase()
@@ -233,7 +281,7 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                       case 'h1':
                         elements.push(
                           new Paragraph({
-                            children: [new TextRun({ text: textContent, bold: true, size: 26 })],
+                            children: htmlToWordElements(element.innerHTML),
                             heading: HeadingLevel.HEADING_2,
                             spacing: { before: 300, after: 150 }
                           })
@@ -242,7 +290,7 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                       case 'h2':
                         elements.push(
                           new Paragraph({
-                            children: [new TextRun({ text: textContent, bold: true, size: 24 })],
+                            children: htmlToWordElements(element.innerHTML),
                             heading: HeadingLevel.HEADING_3,
                             spacing: { before: 200, after: 100 }
                           })
@@ -251,7 +299,7 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                       case 'h3':
                         elements.push(
                           new Paragraph({
-                            children: [new TextRun({ text: textContent, bold: true, size: 22 })],
+                            children: htmlToWordElements(element.innerHTML),
                             heading: HeadingLevel.HEADING_4,
                             spacing: { before: 150, after: 75 }
                           })
@@ -260,25 +308,31 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                       case 'ul':
                         const listItems = element.querySelectorAll('li')
                         listItems.forEach(li => {
-                          elements.push(
-                            new Paragraph({
-                              children: htmlToWordElements(li.innerHTML),
-                              bullet: { level: 0 },
-                              spacing: { after: 100 }
-                            })
-                          )
+                          const listContent = htmlToWordElements(li.innerHTML)
+                          if (listContent.some(item => item.text.trim())) {
+                            elements.push(
+                              new Paragraph({
+                                children: listContent,
+                                numbering: { reference: 'my-bullet-points', level: 0 },
+                                spacing: { after: 100 }
+                              })
+                            )
+                          }
                         })
                         break
                       case 'ol':
                         const numberedItems = element.querySelectorAll('li')
                         numberedItems.forEach((li) => {
-                          elements.push(
-                            new Paragraph({
-                              children: htmlToWordElements(li.innerHTML),
-                              numbering: { reference: 'numbering', level: 0 },
-                              spacing: { after: 100 }
-                            })
-                          )
+                          const listContent = htmlToWordElements(li.innerHTML)
+                          if (listContent.some(item => item.text.trim())) {
+                            elements.push(
+                              new Paragraph({
+                                children: listContent,
+                                numbering: { reference: 'my-numbering', level: 0 },
+                                spacing: { after: 100 }
+                              })
+                            )
+                          }
                         })
                         break
                       case 'p':
@@ -291,9 +345,24 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                           )
                         }
                         break
+                      case 'div':
+                        // Process div content recursively
+                        if (element.childNodes.length > 0) {
+                          element.childNodes.forEach(child => processHtmlElement(child))
+                        } else if (textContent.trim()) {
+                          elements.push(
+                            new Paragraph({
+                              children: htmlToWordElements(element.innerHTML),
+                              spacing: { after: 200 }
+                            })
+                          )
+                        }
+                        break
                       default:
-                        // Handle other elements as paragraphs
-                        if (textContent.trim()) {
+                        // Handle other elements by processing their children or as paragraphs
+                        if (element.childNodes.length > 0) {
+                          element.childNodes.forEach(child => processHtmlElement(child))
+                        } else if (textContent.trim()) {
                           elements.push(
                             new Paragraph({
                               children: htmlToWordElements(element.innerHTML),
@@ -311,7 +380,10 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
                       })
                     )
                   }
-                })
+                }
+                
+                // Process each child element
+                tempDiv.childNodes.forEach(processHtmlElement)
               }
             } else if (part.type === 'table') {
               // Add table
@@ -413,5 +485,170 @@ export async function exportAssignmentToWord(
   } catch (error) {
     console.error('Export failed:', error)
     throw new Error('Kon document niet exporteren')
+  }
+}
+
+// Export assignment to PDF
+export async function exportAssignmentToPDF(
+  assignmentData: ExportAssignmentData,
+  sectionContents: Record<string, string>
+): Promise<void> {
+  try {
+    // Create a temporary container to render HTML content
+    const tempDiv = document.createElement('div')
+    tempDiv.style.position = 'absolute'
+    tempDiv.style.left = '-9999px'
+    tempDiv.style.top = '0'
+    tempDiv.style.width = '800px'
+    tempDiv.style.padding = '40px'
+    tempDiv.style.fontFamily = 'Arial, sans-serif'
+    tempDiv.style.fontSize = '12px'
+    tempDiv.style.lineHeight = '1.6'
+    tempDiv.style.color = '#000'
+    tempDiv.style.backgroundColor = '#fff'
+    
+    // Add CSS styles for WYSIWYG formatting
+    const styleElement = document.createElement('style')
+    styleElement.textContent = `
+      .pdf-export-content ul {
+        margin: 0.5rem 0;
+        padding-left: 1.5rem;
+        list-style-type: disc;
+      }
+      .pdf-export-content ol {
+        margin: 0.5rem 0;
+        padding-left: 1.5rem;
+        list-style-type: decimal;
+      }
+      .pdf-export-content li {
+        margin: 0.25rem 0;
+        display: list-item;
+      }
+      .pdf-export-content h1 {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin: 1rem 0 0.5rem 0;
+        color: #1f2937;
+      }
+      .pdf-export-content h2 {
+        font-size: 1.25rem;
+        font-weight: bold;
+        margin: 0.75rem 0 0.375rem 0;
+        color: #1f2937;
+      }
+      .pdf-export-content h3 {
+        font-size: 1.125rem;
+        font-weight: bold;
+        margin: 0.625rem 0 0.3125rem 0;
+        color: #1f2937;
+      }
+      .pdf-export-content p {
+        margin: 0.5rem 0;
+        line-height: 1.6;
+        min-height: 1.2em;
+      }
+      .pdf-export-content strong {
+        font-weight: bold;
+      }
+      .pdf-export-content em {
+        font-style: italic;
+      }
+      .pdf-export-content u {
+        text-decoration: underline;
+      }
+      .pdf-export-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+        border: 1px solid #d1d5db;
+      }
+      .pdf-export-content th,
+      .pdf-export-content td {
+        border: 1px solid #d1d5db;
+        padding: 0.75rem;
+        text-align: left;
+        min-width: 50px;
+        min-height: 1.2em;
+      }
+      .pdf-export-content th {
+        background-color: #f3f4f6;
+        font-weight: 600;
+      }
+    `
+    document.head.appendChild(styleElement)
+    tempDiv.className = 'pdf-export-content'
+
+    // Build HTML content
+    let htmlContent = `
+      <div style="text-align: center; margin-bottom: 40px;">
+        <h1 style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">
+          ${assignmentData.metadata?.assignmentTitle || assignmentData.title}
+        </h1>
+        ${assignmentData.metadata?.teacherName ? `<p style="margin: 5px 0;">Docent: ${assignmentData.metadata.teacherName}</p>` : ''}
+        ${assignmentData.metadata?.educationLevelInfo ? `<p style="margin: 5px 0;">Niveau: ${assignmentData.metadata.educationLevelInfo.name}</p>` : ''}
+        ${assignmentData.metadata?.createdAt ? `<p style="margin: 5px 0;">Datum: ${new Date(assignmentData.metadata.createdAt).toLocaleDateString('nl-NL')}</p>` : ''}
+      </div>
+    `
+
+    // Add sections
+    assignmentData.sections.forEach(section => {
+      const content = sectionContents[section.id] || ''
+      htmlContent += `
+        <div style="margin-bottom: 30px; page-break-inside: avoid;">
+          <h2 style="font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #1f2937;">
+            ${section.title}
+          </h2>
+          <div style="margin-left: 10px;">
+            ${content}
+          </div>
+        </div>
+      `
+    })
+
+    tempDiv.innerHTML = htmlContent
+    document.body.appendChild(tempDiv)
+
+    // Convert to canvas
+    const canvas = await html2canvas(tempDiv, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff'
+    })
+
+    // Remove temporary div and style element
+    document.body.removeChild(tempDiv)
+    document.head.removeChild(styleElement)
+
+    // Create PDF
+    const pdf = new jsPDF('p', 'mm', 'a4')
+    const imgWidth = 210 // A4 width in mm
+    const pageHeight = 295 // A4 height in mm  
+    const imgHeight = (canvas.height * imgWidth) / canvas.width
+    let heightLeft = imgHeight
+
+    let position = 0
+
+    // Add first page
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
+    heightLeft -= pageHeight
+
+    // Add additional pages if needed
+    while (heightLeft >= 0) {
+      position = heightLeft - imgHeight
+      pdf.addPage()
+      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+    }
+
+    // Download PDF
+    const fileName = assignmentData.metadata?.assignmentTitle 
+      ? `${assignmentData.metadata.assignmentTitle}.pdf`
+      : `${assignmentData.title}.pdf`
+    
+    pdf.save(fileName)
+  } catch (error) {
+    console.error('PDF export failed:', error)
+    throw new Error('Kon PDF niet exporteren')
   }
 }

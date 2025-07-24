@@ -14,7 +14,8 @@
       "Bash(timeout 15 npm run dev)",
       "Bash(npx tsc:*)",
       "Bash(pkill:*)",
-      "Bash(npm cache clean:*)"
+      "Bash(npm cache clean:*)",
+      "Bash(npx next dev:*)"
     ],
     "deny": []
   }

@@ -10,12 +10,33 @@ interface SimpleRichTextEditorProps {
 
 export default function SimpleRichTextEditor({ value, onChange, placeholder }: SimpleRichTextEditorProps) {
   const [showHelp, setShowHelp] = useState(false)
+  const [toolbarState, setToolbarState] = useState({})
   const editorRef = useRef<HTMLDivElement>(null)
 
-  // Set initial content only once when component mounts
+  // Update content when value prop changes
   useEffect(() => {
-    if (editorRef.current && value && !editorRef.current.innerHTML) {
-      editorRef.current.innerHTML = value
+    if (editorRef.current && editorRef.current.innerHTML !== value) {
+      editorRef.current.innerHTML = value || ''
+    }
+  }, [value])
+
+  // Update toolbar state when selection changes
+  useEffect(() => {
+    const updateToolbarState = () => {
+      setToolbarState({})  // Force re-render to update button states
+    }
+
+    const editor = editorRef.current
+    if (editor) {
+      editor.addEventListener('keyup', updateToolbarState)
+      editor.addEventListener('mouseup', updateToolbarState)
+      editor.addEventListener('focus', updateToolbarState)
+      
+      return () => {
+        editor.removeEventListener('keyup', updateToolbarState)
+        editor.removeEventListener('mouseup', updateToolbarState)  
+        editor.removeEventListener('focus', updateToolbarState)
+      }
     }
   }, [])
 
@@ -56,6 +77,11 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder }: S
     handleInput()
   }
 
+  const toggleFormat = (command: string) => {
+    document.execCommand(command, false)
+    handleInput()
+  }
+
   const insertHeading = (level: number) => {
     const selection = window.getSelection()
     if (selection && selection.rangeCount > 0) {
@@ -64,15 +90,74 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder }: S
         ? range.commonAncestorContainer.parentElement 
         : range.commonAncestorContainer as Element
       
-      // If we're already in a heading, convert back to paragraph
-      const currentHeading = element?.closest('h1, h2, h3, h4, h5, h6')
+      // Check if we're already in this heading level
+      const currentHeading = element?.closest(`h${level}`)
       if (currentHeading) {
+        // Convert back to paragraph
         document.execCommand('formatBlock', false, 'p')
       } else {
+        // Convert to heading
         document.execCommand('formatBlock', false, `h${level}`)
       }
       handleInput()
     }
+  }
+
+  const toggleList = (listType: 'ul' | 'ol') => {
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      const element = range.commonAncestorContainer.nodeType === Node.TEXT_NODE 
+        ? range.commonAncestorContainer.parentElement 
+        : range.commonAncestorContainer as Element
+      
+      // Check if we're already in a list
+      const currentList = element?.closest('ul, ol')
+      if (currentList) {
+        // Remove list formatting
+        if (listType === 'ul') {
+          document.execCommand('insertUnorderedList', false)
+        } else {
+          document.execCommand('insertOrderedList', false)
+        }
+      } else {
+        // Add list formatting
+        if (listType === 'ul') {
+          document.execCommand('insertUnorderedList', false)
+        } else {
+          document.execCommand('insertOrderedList', false)
+        }
+      }
+      handleInput()
+    }
+  }
+
+  const isFormatActive = (command: string): boolean => {
+    return document.queryCommandState(command)
+  }
+
+  const isHeadingActive = (level: number): boolean => {
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      const element = range.commonAncestorContainer.nodeType === Node.TEXT_NODE 
+        ? range.commonAncestorContainer.parentElement 
+        : range.commonAncestorContainer as Element
+      return !!element?.closest(`h${level}`)
+    }
+    return false
+  }
+
+  const isListActive = (listType: 'ul' | 'ol'): boolean => {
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      const element = range.commonAncestorContainer.nodeType === Node.TEXT_NODE 
+        ? range.commonAncestorContainer.parentElement 
+        : range.commonAncestorContainer as Element
+      return !!element?.closest(listType)
+    }
+    return false
   }
 
   const getWordCount = (): number => {
@@ -88,24 +173,30 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder }: S
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => executeCommand('bold')}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
+            onClick={() => toggleFormat('bold')}
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isFormatActive('bold') ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
             title="Vet"
           >
             <strong>B</strong>
           </button>
           <button
             type="button"
-            onClick={() => executeCommand('italic')}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
+            onClick={() => toggleFormat('italic')}
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isFormatActive('italic') ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
             title="Cursief"
           >
             <em>I</em>
           </button>
           <button
             type="button"
-            onClick={() => executeCommand('underline')}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
+            onClick={() => toggleFormat('underline')}
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isFormatActive('underline') ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
             title="Onderstreept"
           >
             <u>U</u>
@@ -113,32 +204,40 @@ export default function SimpleRichTextEditor({ value, onChange, placeholder }: S
           <button
             type="button"
             onClick={() => insertHeading(1)}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
-            title="Grote kop"
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isHeadingActive(1) ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
+            title="Grote kop (klik opnieuw voor normaal)"
           >
             H1
           </button>
           <button
             type="button"
             onClick={() => insertHeading(2)}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
-            title="Middelgrote kop"
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isHeadingActive(2) ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
+            title="Middelgrote kop (klik opnieuw voor normaal)"
           >
             H2
           </button>
           <button
             type="button"
-            onClick={() => executeCommand('insertUnorderedList')}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
-            title="Lijst"
+            onClick={() => toggleList('ul')}
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isListActive('ul') ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
+            title="Lijst (klik opnieuw om uit te schakelen)"
           >
             • List
           </button>
           <button
             type="button"
-            onClick={() => executeCommand('insertOrderedList')}
-            className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-100"
-            title="Genummerde lijst"
+            onClick={() => toggleList('ol')}
+            className={`px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100 transition-colors ${
+              isListActive('ol') ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-white'
+            }`}
+            title="Genummerde lijst (klik opnieuw om uit te schakelen)"
           >
             1. List
           </button>
