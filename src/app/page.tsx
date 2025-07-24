@@ -1,203 +1,246 @@
-import TestChatBot from '@/components/TestChatBot'
-import CopyButton from '@/components/CopyButton'
-import Image from 'next/image'
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+
+const educationLevels = [
+  { value: 'PO', label: 'Primair Onderwijs (PO)', description: 'Basisschool, groep 1-8' },
+  { value: 'VMBO', label: 'VMBO', description: 'Voorbereidend middelbaar beroepsonderwijs' },
+  { value: 'HAVO', label: 'HAVO', description: 'Hoger algemeen voortgezet onderwijs' },
+  { value: 'VWO', label: 'VWO', description: 'Voorbereidend wetenschappelijk onderwijs' },
+  { value: 'MBO', label: 'MBO', description: 'Middelbaar beroepsonderwijs' },
+  { value: 'HBO', label: 'HBO', description: 'Hoger beroepsonderwijs' },
+  { value: 'UNI', label: 'Universiteit', description: 'Wetenschappelijk onderwijs' }
+]
 
 export default function Home() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100">
-      <div className="container mx-auto px-4 py-16">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-purple-600 rounded-full mb-6">
-            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          
-          <h1 className="text-5xl font-bold text-gray-800 mb-4">
-            Vibe Coding Template
-          </h1>
-          
-          <p className="text-xl text-purple-700 font-medium mb-6">
-            Dit is een template om met Bolt te werken waarbij we gebruik maken van Gemini. Dit template is gemaakt door Tom Naberink
-          </p>
+  const [file, setFile] = useState<File | null>(null)
+  const [additionalInstructions, setAdditionalInstructions] = useState('')
+  const [educationLevel, setEducationLevel] = useState('HAVO')
+  const [teacherName, setTeacherName] = useState('')
+  const [assignmentTitle, setAssignmentTitle] = useState('')
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const router = useRouter()
 
-          {/* AI voor Docenten Logo */}
-          <div className="flex justify-center mb-8">
-            <div className="bg-white rounded-lg shadow-lg p-4">
-              <Image 
-                src="/images/ai-voor-docenten-logo.png" 
-                alt="AI voor Docenten Logo" 
-                width={192} 
-                height={96}
-                className="rounded-lg"
-              />
-            </div>
-          </div>
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0]
+      const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+      
+      if (validTypes.includes(selectedFile.type)) {
+        setFile(selectedFile)
+      } else {
+        alert('Alleen PDF en DOCX bestanden zijn toegestaan')
+      }
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!file) {
+      alert('Upload eerst een opdracht document')
+      return
+    }
+
+    setIsAnalyzing(true)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('instructions', additionalInstructions)
+      formData.append('educationLevel', educationLevel)
+      formData.append('teacherName', teacherName)
+      formData.append('assignmentTitle', assignmentTitle)
+
+      const response = await fetch('/api/analyze-assignment', {
+        method: 'POST',
+        body: formData,
+      })
+
+      console.log('Response status:', response.status)
+      console.log('Response ok:', response.ok)
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log('Received data:', data)
+        sessionStorage.setItem('assignmentData', JSON.stringify(data))
+        console.log('Data stored in sessionStorage, redirecting to /workspace')
+        router.push('/workspace')
+      } else {
+        const errorText = await response.text()
+        console.error('Error response:', errorText)
+        
+        try {
+          const errorData = JSON.parse(errorText)
+          const errorMessage = errorData.error || 'Er ging iets mis bij het analyseren van de opdracht'
+          const errorDetails = errorData.details ? `\n\nDetails: ${errorData.details}` : ''
+          alert(errorMessage + errorDetails)
+        } catch {
+          alert('Er ging iets mis bij het analyseren van de opdracht\n\nDetails: ' + errorText)
+        }
+      }
+    } catch (error) {
+      console.error('Error:', error)
+      alert('Er ging iets mis bij het verwerken van het bestand')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="container mx-auto px-4 py-16">
+        <div className="text-center mb-12">
+          <h1 className="text-5xl font-bold text-gray-800 mb-4">
+            Meta-Verslag App
+          </h1>
+          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+            Genereer een online leeromgeving op basis van uw opdracht. 
+            De app analyseert uw document en creëert een gestructureerde omgeving 
+            met socratische begeleiding voor elke sectie.
+          </p>
         </div>
 
-        {/* Main Content */}
-        <div className="max-w-4xl mx-auto">
-          
-          {/* Setup Instructions */}
+        <div className="max-w-3xl mx-auto">
           <div className="bg-white rounded-2xl shadow-xl p-8">
-            <h2 className="text-2xl font-bold text-purple-800 mb-6 flex items-center">
-              <span className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
-                🔧
-              </span>
-              Setup Instructies
-            </h2>
-            
-            <div className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
               
-              {/* Step 1 - Fork GitHub Template */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 1: Fork dit template in GitHub
-                </h3>
-                <p className="text-gray-600 mb-3">
-                  Ga naar <a href="https://github.com" target="_blank" className="text-purple-600 hover:text-purple-800 underline">github.com</a> en login in. Ga dan naar deze pagina: <a href="https://github.com/TomNaberink/apitemplateTom" target="_blank" className="text-purple-600 hover:text-purple-800 underline">https://github.com/TomNaberink/apitemplateTom</a>
-                </p>
-                <p className="text-gray-600 mb-3">
-                  Klik rechtsbovenin op '<strong>Use this template</strong>', geef het een gepaste naam voor je project en klik op '<strong>create fork</strong>'.
-                </p>
-                <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-gray-400">GitHub Repository URL</span>
-                    <CopyButton 
-                      text="https://github.com/TomNaberink/apitemplateTom"
-                      className="text-purple-400 hover:text-purple-300 text-xs transition-colors"
-                      title="Kopieer GitHub URL"
-                    />
-                  </div>
-                  <code>https://github.com/TomNaberink/apitemplateTom</code>
+              {/* Teacher and Assignment Info */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="teacherName" className="block text-sm font-medium text-gray-700 mb-2">
+                    Naam docent (optioneel)
+                  </label>
+                  <input
+                    type="text"
+                    id="teacherName"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="Uw naam"
+                    value={teacherName}
+                    onChange={(e) => setTeacherName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="assignmentTitle" className="block text-sm font-medium text-gray-700 mb-2">
+                    Titel opdracht (optioneel)
+                  </label>
+                  <input
+                    type="text"
+                    id="assignmentTitle"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="Titel van de opdracht"
+                    value={assignmentTitle}
+                    onChange={(e) => setAssignmentTitle(e.target.value)}
+                  />
                 </div>
               </div>
 
-              {/* Step 2 - Import from GitHub in Bolt */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 2: Import in Bolt.new
-                </h3>
-                <p className="text-gray-600 mb-3">
-                  Open <a href="https://bolt.new" target="_blank" className="text-purple-600 hover:text-purple-800 underline">Bolt.new</a> en login. Selecteer '<strong>import from github</strong>' en login op GitHub. Kies dan de '<strong>repository</strong>' die je net hebt geforkt.
-                </p>
-              </div>
-
-              {/* Step 3 - Create .env.local */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 3: Maak een .env.local bestand
-                </h3>
-                <p className="text-gray-600 mb-3">
-                  Als het template is geladen ga je naar het <strong>tabblad "Code"</strong>. Bij de files doe je <strong>rechtermuisknop</strong> en klik je op <strong>"New File"</strong>. Die noem je <code className="bg-gray-100 px-2 py-1 rounded text-sm">.env.local</code>. Daar binnen zet je het volgende:
-                </p>
-                <div className="bg-gray-900 text-green-400 p-4 rounded-lg font-mono text-sm">
-                  <div className="flex items-center justify-end mb-2">
-                    <CopyButton 
-                      text="GEMINI_API_KEY=your_actual_api_key_here"
-                      className="text-purple-400 hover:text-purple-300 text-xs transition-colors"
-                      title="Kopieer .env.local inhoud"
-                    />
-                  </div>
-                  <code>GEMINI_API_KEY=your_actual_api_key_here</code>
-                </div>
-                <p className="text-orange-600 text-sm mt-2 font-medium">
-                  ⚠️ Vervang "your_actual_api_key_here" met je echte API key! (zie stap 3)
-                </p>
-              </div>
-
-              {/* Step 4 - Get API Key */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 4: Verkrijg een Gemini API Key
-                </h3>
-                <p className="text-gray-600 mb-3">
-                  Ga naar Google AI Studio om je gratis API key aan te maken:
-                </p>
-                <a 
-                  href="https://makersuite.google.com/app/apikey" 
-                  target="_blank"
-                  className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              {/* Education Level */}
+              <div>
+                <label htmlFor="educationLevel" className="block text-sm font-medium text-gray-700 mb-2">
+                  Onderwijsniveau *
+                </label>
+                <select
+                  id="educationLevel"
+                  value={educationLevel}
+                  onChange={(e) => setEducationLevel(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 >
-                  <span>Verkrijg API Key</span>
-                  <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
-                </a>
-                
-                <div className="mt-4 p-4 bg-orange-50 border border-orange-200 rounded-lg">
-                  <p className="text-orange-800 text-sm">
-                    ⚠️ <strong>Let op</strong>, je kunt gratis en risicovrij oefenen met de Gemini API. Daarnaast kun je 300,- dollar gratis budget krijgen. Als dat op, dan moet je het koppelen aan je creditcard. Zorg ervoor dat je weet wat je doet op dat moment!
-                  </p>
+                  {educationLevels.map((level) => (
+                    <option key={level.value} value={level.value}>
+                      {level.label} - {level.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {/* Document Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload opdracht document *
+                </label>
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-indigo-400 transition-colors">
+                  <input
+                    type="file"
+                    accept=".pdf,.docx"
+                    onChange={handleFileChange}
+                    className="hidden"
+                    id="file-upload"
+                  />
+                  <label
+                    htmlFor="file-upload"
+                    className="cursor-pointer"
+                  >
+                    {file ? (
+                      <div className="text-green-600">
+                        <svg className="mx-auto h-12 w-12 mb-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        <p className="font-medium">{file.name}</p>
+                        <p className="text-sm text-gray-500">Klik om een ander bestand te kiezen</p>
+                      </div>
+                    ) : (
+                      <div className="text-gray-500">
+                        <svg className="mx-auto h-12 w-12 mb-2" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                          <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <p className="font-medium">Klik om een bestand te uploaden</p>
+                        <p className="text-sm">PDF of DOCX (max. 10MB)</p>
+                      </div>
+                    )}
+                  </label>
                 </div>
               </div>
 
-              {/* Step 5 - Enhanced Test Step */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 5: Test je API Key & Alle Features
-                </h3>
-                <TestChatBot />
+              {/* Additional Instructions */}
+              <div>
+                <label htmlFor="instructions" className="block text-sm font-medium text-gray-700 mb-2">
+                  Aanvullende instructies (optioneel)
+                </label>
+                <textarea
+                  id="instructions"
+                  rows={4}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                  placeholder="Geef hier eventuele aanvullende instructies voor de leeromgeving..."
+                  value={additionalInstructions}
+                  onChange={(e) => setAdditionalInstructions(e.target.value)}
+                />
               </div>
 
-              {/* Step 6 - Build Step */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 6: Bouwen maar!
-                </h3>
-                <p className="text-gray-600">
-                  Er staat veel informatie in de <code className="bg-gray-100 px-2 py-1 rounded text-sm">README.md</code>, maar je mag ook lekker gaan viben! Wat ga jij maken om het onderwijs te verbeteren?
-                </p>
-              </div>
+              <button
+                type="submit"
+                disabled={!file || isAnalyzing}
+                className={`w-full py-3 px-6 rounded-lg font-semibold text-white transition-all ${
+                  !file || isAnalyzing
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700 transform hover:scale-105'
+                }`}
+              >
+                {isAnalyzing ? (
+                  <span className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Opdracht wordt geanalyseerd...
+                  </span>
+                ) : (
+                  'Genereer Leeromgeving'
+                )}
+              </button>
+            </form>
 
-              {/* Step 7 - Deploy with Vercel */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 7: Deploy met Vercel
-                </h3>
-                <p className="text-gray-600 mb-3">
-                  Ga naar <a href="https://vercel.com" target="_blank" className="text-purple-600 hover:text-purple-800 underline">Vercel.com</a>, login en koppel je Github. Klik op <strong>'Add New'</strong> en importeer de Github die je net hebt gemaakt binnen Bolt. <strong className="text-red-600">KLIK NOG NIET OP DEPLOY</strong>. Eerst moet je de <strong>'Environment Variable'</strong> instellen:
-                </p>
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-3">
-                  <p className="text-yellow-800 text-sm mb-2">
-                    ⚙️ <strong>Environment Variables instellen:</strong>
-                  </p>
-                  <ul className="text-yellow-700 text-sm space-y-1">
-                    <li>• Bij <strong>'Key'</strong> vul je <code className="bg-yellow-100 px-1 rounded">GEMINI_API_KEY</code> in</li>
-                    <li>• Bij <strong>'Value'</strong> vul je je echte API key in</li>
-                    <li>• Klik dan pas op <strong>'Deploy'</strong></li>
-                  </ul>
-                </div>
-              </div>
-
-              {/* Step 8 - Test and Share */}
-              <div className="border-l-4 border-purple-500 pl-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                  Stap 8: Testen en delen
-                </h3>
-                <p className="text-gray-600 mb-3">
-                  🎉 <strong>Gefeliciteerd!</strong> Je AI-tool is nu live op het internet. Test alles zorgvuldig voordat je het deelt!
-                </p>
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <p className="text-green-800 text-sm">
-                    🌟 <strong>Tijd om te delen!</strong> Laat je collega's, studenten of vrienden zien wat je hebt gebouwd. Wie weet inspireer je anderen om ook te gaan experimenteren met AI in het onderwijs! 🚀
-                  </p>
-                </div>
-              </div>
+            <div className="mt-8 p-4 bg-blue-50 rounded-lg">
+              <h3 className="font-semibold text-blue-900 mb-2">Hoe werkt het?</h3>
+              <ol className="text-sm text-blue-800 space-y-1">
+                <li>1. Upload uw opdracht document (PDF of DOCX)</li>
+                <li>2. De app analyseert de structuur en secties</li>
+                <li>3. Er wordt een leeromgeving gegenereerd met:</li>
+                <li className="ml-4">• Navigeerbare secties</li>
+                <li className="ml-4">• Tekstvakken per sectie</li>
+                <li className="ml-4">• Socratische chatbot begeleiding</li>
+                <li>4. Studenten kunnen aan de slag met hun opdracht</li>
+              </ol>
             </div>
-          </div>
-
-          {/* Footer */}
-          <div className="text-center mt-12">
-            <div className="inline-flex items-center space-x-4 text-purple-600">
-              <span>💜</span>
-              <span>Veel succes met bouwen!</span>
-              <span>💜</span>
-            </div>
-            <p className="text-gray-500 text-sm mt-2">
-              Vibe Coding Template door Tom Naberink • Powered by Bolt, Next.js & Gemini AI
-            </p>
           </div>
         </div>
       </div>

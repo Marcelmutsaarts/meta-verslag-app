@@ -1,3 +1,108 @@
 @tailwind base;
 @tailwind components;
-@tailwind utilities; 
+@tailwind utilities;
+
+/* WYSIWYG Editor Styles */
+.wysiwyg-editor {
+  cursor: text;
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: embed;
+}
+
+.wysiwyg-editor:focus {
+  outline: none;
+}
+
+.wysiwyg-editor[contenteditable]:empty::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+  pointer-events: none;
+  position: absolute;
+}
+
+.wysiwyg-editor h1 {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin: 1rem 0 0.5rem 0;
+  color: #1f2937;
+}
+
+.wysiwyg-editor h2 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin: 0.75rem 0 0.375rem 0;
+  color: #1f2937;
+}
+
+.wysiwyg-editor h3 {
+  font-size: 1.125rem;
+  font-weight: bold;
+  margin: 0.625rem 0 0.3125rem 0;
+  color: #1f2937;
+}
+
+.wysiwyg-editor p {
+  margin: 0.5rem 0;
+  line-height: 1.6;
+  min-height: 1.2em;
+  direction: ltr;
+  text-align: left;
+}
+
+.wysiwyg-editor p:first-child {
+  margin-top: 0;
+}
+
+.wysiwyg-editor p:last-child {
+  margin-bottom: 0;
+}
+
+.wysiwyg-editor ul, 
+.wysiwyg-editor ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.wysiwyg-editor li {
+  margin: 0.25rem 0;
+}
+
+.wysiwyg-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  border: 1px solid #d1d5db;
+}
+
+.wysiwyg-editor th,
+.wysiwyg-editor td {
+  border: 1px solid #d1d5db;
+  padding: 0.75rem;
+  text-align: left;
+  min-width: 50px;
+  min-height: 1.2em;
+}
+
+.wysiwyg-editor th {
+  background-color: #f3f4f6;
+  font-weight: 600;
+}
+
+.wysiwyg-editor strong {
+  font-weight: bold;
+}
+
+.wysiwyg-editor em {
+  font-style: italic;
+}
+
+.wysiwyg-editor u {
+  text-decoration: underline;
+}
+
+.wysiwyg-editor br {
+  display: block;
+  margin: 0.5em 0;
+  content: "";
+} 
