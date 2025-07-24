@@ -52,9 +52,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Selecteer het juiste model op basis van aiModel
-    const modelName = aiModel === 'pro' ? 'gemini-2.5-pro-preview-06-05' :
+    const modelName = aiModel === 'pro' ? 'gemini-2.5-flash-preview-05-20' :
                      aiModel === 'smart' ? 'gemini-2.5-flash-preview-05-20' :
-                     'gemini-2.0-flash-exp' // internet
+                     'gemini-2.5-flash-preview-05-20' // internet
     const model = genAI.getGenerativeModel({ model: modelName })
 
     // Configureer tools array - grounding alleen voor Gemini 2.0 (internet model)

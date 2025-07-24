@@ -57,12 +57,35 @@ function contentToText(content: string): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { message, section, currentContent, assignmentContext, metadata } = body
+    const { 
+      message, 
+      currentSection, 
+      currentContent, 
+      allSectionContents, 
+      sectionProgress,
+      assignmentContext, 
+      metadata 
+    } = body
 
     // Convert content (markdown/HTML) to readable text for context
     const readableContent = contentToText(currentContent || '')
+    
+    // Process all section contents for cross-section awareness
+    const allSectionsContext = sectionProgress ? sectionProgress.map(section => ({
+      ...section,
+      readableContent: contentToText(section.content || '')
+    })) : []
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' })
+
+    // Create a comprehensive overview of all sections for context
+    const sectionsOverview = allSectionsContext.length > 0 ? allSectionsContext.map(section => 
+      `${section.isCurrentSection ? '>>> HUIDIGE SECTIE <<<' : ''}
+Sectie: "${section.title}"
+Beschrijving: ${section.description}
+Status: ${section.hasContent ? 'Heeft inhoud geschreven' : 'Nog leeg'}
+${section.readableContent ? `Inhoud samenvatting: ${section.readableContent.substring(0, 200)}${section.readableContent.length > 200 ? '...' : ''}` : 'Geen inhoud'}`
+    ).join('\n\n') : 'Geen sectie overzicht beschikbaar'
 
     const socraticPrompt = `
 Je bent een socratische tutor die studenten begeleidt bij het schrijven van hun opdracht.
@@ -74,18 +97,29 @@ ${metadata?.educationLevelInfo ? `- Onderwijsniveau: ${metadata.educationLevelIn
 ${metadata?.educationLevelInfo ? `- Complexiteitsniveau: ${metadata.educationLevelInfo.complexity}` : ''}
 ${metadata?.teacherName ? `- Docent: ${metadata.teacherName}` : ''}
 
-Context van de opdracht:
+OPDRACHT CONTEXT:
 - Titel: ${assignmentContext.title}
 - Doel: ${assignmentContext.objective}
 - Algemene richtlijnen: ${assignmentContext.generalGuidance}
 
-Huidige sectie:
-- Titel: ${section.title}
-- Beschrijving: ${section.description}
-- Hulpvragen voor deze sectie: ${section.guideQuestions.join(', ')}
+HUIDIGE SECTIE (waar student aan werkt):
+- Titel: ${currentSection.title}
+- Beschrijving: ${currentSection.description}
+- Hulpvragen voor deze sectie: ${currentSection.guideQuestions.join(', ')}
 
-Wat de student tot nu toe heeft geschreven:
+Wat de student in deze sectie heeft geschreven:
 "${readableContent || 'Nog niets geschreven'}"
+
+OVERZICHT VAN ALLE SECTIES (voor holistische begeleiding):
+${sectionsOverview}
+
+CROSS-SECTIE BEWUSTZIJN:
+- Je hebt inzicht in wat de student in andere secties heeft geschreven
+- Gebruik deze informatie om verbanden te leggen tussen secties
+- Help de student consistentie te bewaren tussen verschillende delen
+- Wijs op mogelijke tegenstrijdigheden of gemiste verbindingen
+- Moedig de student aan om eerder geschreven content te gebruiken waar relevant
+- Stel vragen die helpen de rode draad door de hele opdracht te behouden
 
 OPMERKING: De student gebruikt een rich text editor met opmaak en mogelijk tabellen. Begrijp de structuur en inhoud van hun werk.
 
@@ -96,10 +130,13 @@ Reageer als een socratische tutor, aangepast aan het onderwijsniveau:
 2. Moedig kritisch denken aan op het juiste niveau
 3. Help hen structuur aan te brengen in hun gedachten
 4. Verwijs naar de hulpvragen van de sectie indien relevant
-5. Geef NOOIT direct antwoorden of schrijf NOOIT tekst voor hen
-6. Als ze om voorbeelden vragen, stel dan vragen die hen helpen zelf voorbeelden te bedenken
-7. Wees bemoedigend maar blijf uitdagend
-8. Houd je reactie beknopt (max 3-4 zinnen)
+5. Gebruik je kennis van andere secties om verbanden te leggen
+6. Help de student consistentie te bewaren tussen secties
+7. Geef NOOIT direct antwoorden of schrijf NOOIT tekst voor hen
+8. Als ze om voorbeelden vragen, stel dan vragen die hen helpen zelf voorbeelden te bedenken
+9. Wees bemoedigend maar blijf uitdagend
+10. Houd je reactie beknopt (max 3-4 zinnen)
+11. Verwijs subtiel naar eerder geschreven content als dat relevant is
 
 ${metadata?.educationLevelInfo ? `
 NIVEAU-SPECIFIEKE AANPAK voor ${metadata.educationLevelInfo.name}:
@@ -117,6 +154,13 @@ Voorbeelden van goede socratische vragen:
 - "Hoe zou je dit uitleggen aan iemand die er niets van weet?"
 - "Welke bewijzen of voorbeelden zou je kunnen gebruiken om dit punt te ondersteunen?"
 - "Wat zijn mogelijke tegenargumenten en hoe zou je daarop reageren?"
+
+Voorbeelden van cross-sectie bewustzijn vragen:
+- "Hoe sluit wat je hier schrijft aan bij wat je eerder in [andere sectie] hebt beschreven?"
+- "Is er een verband tussen dit punt en wat je in de inleiding hebt gesteld?"
+- "Hoe zou je dit argument kunnen versterken met informatie uit je eerdere secties?"
+- "Welke rode draad zie je door je hele opdracht heen lopen?"
+- "Past dit wel bij de toon en stijl die je in andere secties gebruikt?"
 `
 
     const result = await model.generateContent(socraticPrompt)

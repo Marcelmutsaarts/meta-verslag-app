@@ -6,6 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Meta-Verslag-App is an AI-powered educational tool that transforms assignment documents into interactive learning environments with Socratic guidance. Teachers upload assignment documents (PDF/DOCX), and the system generates structured learning environments where students can write section-by-section with AI assistance that follows Socratic methodology.
 
+## Key Features
+
+### Multi-Document Upload
+- **Multiple File Support**: Upload PDF, DOCX, and TXT files simultaneously
+- **Token Counting**: Real-time token estimation with visual feedback
+- **20k Token Limit**: Built-in safeguards with color-coded warnings
+- **File Management**: Individual file removal and progress tracking
+
+### Student Authentication & Work Management
+- **Simple Login System**: Students can login with name/email for personalized experience
+- **Work Persistence**: All student work is automatically saved to localStorage
+- **JSON Export/Import**: Students can save and restore their complete work sessions
+- **Cross-Session Continuity**: Resume work on any device with saved JSON files
+
 ## Development Commands
 
 ```bash
@@ -62,9 +76,9 @@ Get API key from: https://makersuite.google.com/app/apikey
 - `/api/generate-tts`: Text-to-speech with 30+ voices
 
 ### Gemini Model Usage
-- **Analysis**: `gemini-2.0-flash-exp` for document structure analysis
-- **Chat**: `gemini-2.0-flash-exp` for Socratic conversations
-- **Multi-modal**: Various Gemini models for inherited features
+- **Analysis**: `gemini-2.5-flash-preview-05-20` for document structure analysis
+- **Chat**: `gemini-2.5-flash-preview-05-20` for Socratic conversations
+- **Multi-modal**: `gemini-2.5-flash-preview-05-20` for all API features
 
 ## Critical Educational Principles
 
@@ -105,6 +119,17 @@ The `/api/socratic-chat` endpoint is meta-prompted to:
 - **FileUpload**: Multi-file upload handling
 - **VoiceInput**: Speech recognition
 - **MarkdownRenderer**: AI response formatting
+
+### Export Functionality
+- **Word Export**: Full support for rich text formatting including:
+  - Bullet points (unordered lists) with HTML and text-based fallback detection
+  - Numbered lists (ordered lists) with HTML and text-based fallback detection
+  - Bold, italic, and underline text
+  - Headings (H1-H6)
+  - Paragraphs and line breaks
+  - Tables (preserved from HTML)
+  - Robust list detection that works regardless of browser HTML generation
+- **PDF Export**: HTML to PDF conversion with CSS styling for lists
 
 ## Debugging Tools
 

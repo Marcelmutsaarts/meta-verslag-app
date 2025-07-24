@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       const base64Audio = Buffer.from(arrayBuffer).toString('base64')
 
       // Initialize Gemini model (2.5 Flash supports audio)
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' })
 
       // Create audio part for Gemini using inline data
       const audioPart = {

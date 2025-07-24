@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, Table, TableCell, TableRow, HeadingLevel, AlignmentType, LevelFormat } from 'docx'
+import { Document, Packer, Paragraph, TextRun, Table, TableCell, TableRow, HeadingLevel, AlignmentType, NumberFormat } from 'docx'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 
@@ -18,6 +18,240 @@ interface AssignmentData {
     }
     createdAt: string
   }
+}
+
+// Convert HTML content to Word paragraphs with proper list support
+function processHtmlToWordParagraphs(html: string): Paragraph[] {
+  if (!html) return []
+  
+  // Debug logging
+  // if (html.includes('<li') || html.includes('•') || html.includes('1.')) {
+  //   alert('HTML being processed:\n\n' + html.substring(0, 500) + (html.length > 500 ? '...' : ''))
+  // }
+  console.log('Processing HTML for Word export:', html)
+  
+  const tempDiv = document.createElement('div')
+  tempDiv.innerHTML = html
+  
+  const paragraphs: Paragraph[] = []
+  let currentListType: 'ul' | 'ol' | null = null
+  let listItemIndex = 0
+  
+  // Extract all text content from a node, preserving formatting
+  function extractAllContent(node: Node, parentFormatting: { bold?: boolean, italics?: boolean, underline?: boolean } = {}): TextRun[] {
+    const runs: TextRun[] = []
+    
+    function processNodeContent(n: Node, formatting: { bold?: boolean, italics?: boolean, underline?: boolean }): void {
+      if (n.nodeType === Node.TEXT_NODE) {
+        const text = n.textContent || ''
+        if (text) {
+          runs.push(new TextRun({ 
+            text, 
+            size: 24,
+            bold: formatting.bold,
+            italics: formatting.italics,
+            underline: formatting.underline ? {} : undefined
+          }))
+        }
+      } else if (n.nodeType === Node.ELEMENT_NODE) {
+        const element = n as Element
+        const tagName = element.tagName.toLowerCase()
+        
+        const newFormatting = { ...formatting }
+        
+        switch (tagName) {
+          case 'strong':
+          case 'b':
+            newFormatting.bold = true
+            break
+          case 'em':
+          case 'i':
+            newFormatting.italics = true
+            break
+          case 'u':
+            newFormatting.underline = true
+            break
+          case 'br':
+            runs.push(new TextRun({ text: '\n', size: 24 }))
+            return
+        }
+        
+        // Process all child nodes recursively
+        n.childNodes.forEach(child => processNodeContent(child, newFormatting))
+      }
+    }
+    
+    processNodeContent(node, parentFormatting)
+    return runs
+  }
+  
+  function processNode(node: Node): void {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as Element
+      const tagName = element.tagName.toLowerCase()
+      
+      switch (tagName) {
+        case 'p':
+        case 'div':
+          // Check if this div/p is inside a list item - if so, don't create a separate paragraph
+          if (!element.closest('li')) {
+            const textRuns = extractAllContent(node)
+            if (textRuns.length > 0) {
+              paragraphs.push(new Paragraph({
+                children: textRuns,
+                spacing: { after: 200 }
+              }))
+            }
+          } else {
+            // If inside a list item, just process children
+            node.childNodes.forEach(processNode)
+          }
+          break
+          
+        case 'h1':
+        case 'h2':
+        case 'h3':
+        case 'h4':
+        case 'h5':
+        case 'h6':
+          const headingRuns = extractAllContent(node)
+          if (headingRuns.length > 0) {
+            const level = parseInt(tagName.charAt(1))
+            paragraphs.push(new Paragraph({
+              children: headingRuns,
+              heading: level <= 3 ? HeadingLevel[`HEADING_${level}` as keyof typeof HeadingLevel] : HeadingLevel.HEADING_3,
+              spacing: { before: 240, after: 120 }
+            }))
+          }
+          break
+          
+        case 'ul':
+          currentListType = 'ul'
+          listItemIndex = 0
+          node.childNodes.forEach(processNode)
+          currentListType = null
+          break
+          
+        case 'ol':
+          currentListType = 'ol'
+          listItemIndex = 1
+          node.childNodes.forEach(processNode)
+          currentListType = null
+          break
+          
+        case 'li':
+          // Extract ALL content from the list item, including nested elements
+          const listRuns = extractAllContent(node)
+          if (listRuns.length > 0 || node.textContent?.trim()) {
+            // If no runs but has text content, create a run for it
+            const finalRuns = listRuns.length > 0 ? listRuns : [new TextRun({ text: node.textContent?.trim() || '', size: 24 })]
+            
+            if (currentListType === 'ul') {
+              paragraphs.push(new Paragraph({
+                children: finalRuns,
+                bullet: { level: 0 },
+                spacing: { after: 100 }
+              }))
+            } else if (currentListType === 'ol') {
+              paragraphs.push(new Paragraph({
+                children: finalRuns,
+                numbering: {
+                  reference: 'default-numbering',
+                  level: 0,
+                  instance: 0
+                },
+                spacing: { after: 100 }
+              }))
+              listItemIndex++
+            } else {
+              // Fallback for li outside of ul/ol
+              paragraphs.push(new Paragraph({
+                children: [new TextRun({ text: '• ', size: 24 }), ...finalRuns],
+                spacing: { after: 100 }
+              }))
+            }
+          }
+          break
+          
+        default:
+          // For other elements, just process their children
+          node.childNodes.forEach(processNode)
+      }
+    } else if (node.nodeType === Node.TEXT_NODE) {
+      // Handle text nodes that are direct children of the container
+      const text = node.textContent?.trim()
+      if (text && !node.parentElement?.closest('li')) {
+        paragraphs.push(new Paragraph({
+          children: [new TextRun({ text, size: 24 })],
+          spacing: { after: 200 }
+        }))
+      }
+    }
+  }
+  
+  tempDiv.childNodes.forEach(processNode)
+  
+  // Fallback: If no lists were found but the text suggests lists, try text-based detection
+  if (paragraphs.length === 0 || !html.includes('<ul') && !html.includes('<ol') && (html.includes('•') || html.match(/^\s*\d+\./m))) {
+    console.log('No HTML lists found, trying text-based list detection')
+    return processTextBasedLists(html)
+  }
+  
+  console.log(`Processed ${paragraphs.length} paragraphs for Word export`)
+  
+  return paragraphs
+}
+
+// Fallback function to detect lists from plain text patterns
+function processTextBasedLists(html: string): Paragraph[] {
+  const paragraphs: Paragraph[] = []
+  
+  // First strip HTML tags to get plain text, but keep some structure
+  const tempDiv = document.createElement('div')
+  tempDiv.innerHTML = html
+  const textContent = tempDiv.textContent || tempDiv.innerText || ''
+  
+  // Split into lines and process each line
+  const lines = textContent.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+  
+  for (const line of lines) {
+    // Check for bullet list patterns
+    if (line.match(/^[•·▪▫◦‣⁃]\s+/) || line.match(/^[-*]\s+/)) {
+      const text = line.replace(/^[•·▪▫◦‣⁃\-*]\s*/, '')
+      if (text.trim()) {
+        paragraphs.push(new Paragraph({
+          children: [new TextRun({ text: text.trim(), size: 24 })],
+          bullet: { level: 0 },
+          spacing: { after: 100 }
+        }))
+      }
+    }
+    // Check for numbered list patterns
+    else if (line.match(/^\d+[\.)]\s+/)) {
+      const text = line.replace(/^\d+[\.)]\s*/, '')
+      if (text.trim()) {
+        paragraphs.push(new Paragraph({
+          children: [new TextRun({ text: text.trim(), size: 24 })],
+          numbering: {
+            reference: 'default-numbering',
+            level: 0,
+            instance: 0
+          },
+          spacing: { after: 100 }
+        }))
+      }
+    }
+    // Regular paragraph
+    else if (line.trim()) {
+      paragraphs.push(new Paragraph({
+        children: [new TextRun({ text: line.trim(), size: 24 })],
+        spacing: { after: 200 }
+      }))
+    }
+  }
+  
+  console.log(`Text-based processing created ${paragraphs.length} paragraphs`)
+  return paragraphs
 }
 
 // Convert HTML content to Word TextRun elements with formatting
@@ -148,40 +382,21 @@ export function splitHtmlByTables(html: string): Array<{ type: 'text' | 'table',
 export async function createWordDocument(assignmentData: AssignmentData): Promise<Blob> {
   const doc = new Document({
     numbering: {
-      config: [
-        {
-          reference: "my-numbering",
-          levels: [
-            {
-              level: 0,
-              format: LevelFormat.DECIMAL,
-              text: "%1.",
-              alignment: AlignmentType.LEFT,
-              style: {
-                paragraph: {
-                  indent: { left: 720, hanging: 260 },
-                },
-              },
-            },
-          ],
-        },
-        {
-          reference: "my-bullet-points",
-          levels: [
-            {
-              level: 0,
-              format: LevelFormat.BULLET,
-              text: "•",
-              alignment: AlignmentType.LEFT,
-              style: {
-                paragraph: {
-                  indent: { left: 720, hanging: 260 },
-                },
-              },
-            },
-          ],
-        },
-      ],
+      config: [{
+        reference: 'default-numbering',
+        levels: [{
+          level: 0,
+          format: NumberFormat.DECIMAL,
+          text: '%1.',
+          alignment: AlignmentType.LEFT,
+          style: {
+            paragraph: {
+              spacing: { after: 100 },
+              indent: { left: 720, hanging: 360 }
+            }
+          }
+        }]
+      }]
     },
     sections: [{
       properties: {},
@@ -259,169 +474,11 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
             })
           )
           
-          // Process HTML content directly
-          const contentParts = splitHtmlByTables(section.content)
-          
-          contentParts.forEach(part => {
-            if (part.type === 'text') {
-              const htmlContent = part.content as string
-              if (htmlContent.trim()) {
-                // Parse HTML content and convert to Word elements
-                const tempDiv = document.createElement('div')
-                tempDiv.innerHTML = htmlContent
-                
-                // Process HTML content more robustly
-                const processHtmlElement = (node: Node): void => {
-                  if (node.nodeType === Node.ELEMENT_NODE) {
-                    const element = node as Element
-                    const tagName = element.tagName.toLowerCase()
-                    const textContent = element.textContent || ''
-                    
-                    switch (tagName) {
-                      case 'h1':
-                        elements.push(
-                          new Paragraph({
-                            children: htmlToWordElements(element.innerHTML),
-                            heading: HeadingLevel.HEADING_2,
-                            spacing: { before: 300, after: 150 }
-                          })
-                        )
-                        break
-                      case 'h2':
-                        elements.push(
-                          new Paragraph({
-                            children: htmlToWordElements(element.innerHTML),
-                            heading: HeadingLevel.HEADING_3,
-                            spacing: { before: 200, after: 100 }
-                          })
-                        )
-                        break
-                      case 'h3':
-                        elements.push(
-                          new Paragraph({
-                            children: htmlToWordElements(element.innerHTML),
-                            heading: HeadingLevel.HEADING_4,
-                            spacing: { before: 150, after: 75 }
-                          })
-                        )
-                        break
-                      case 'ul':
-                        const listItems = element.querySelectorAll('li')
-                        listItems.forEach(li => {
-                          const listContent = htmlToWordElements(li.innerHTML)
-                          if (listContent.some(item => item.text.trim())) {
-                            elements.push(
-                              new Paragraph({
-                                children: listContent,
-                                numbering: { reference: 'my-bullet-points', level: 0 },
-                                spacing: { after: 100 }
-                              })
-                            )
-                          }
-                        })
-                        break
-                      case 'ol':
-                        const numberedItems = element.querySelectorAll('li')
-                        numberedItems.forEach((li) => {
-                          const listContent = htmlToWordElements(li.innerHTML)
-                          if (listContent.some(item => item.text.trim())) {
-                            elements.push(
-                              new Paragraph({
-                                children: listContent,
-                                numbering: { reference: 'my-numbering', level: 0 },
-                                spacing: { after: 100 }
-                              })
-                            )
-                          }
-                        })
-                        break
-                      case 'p':
-                        if (textContent.trim()) {
-                          elements.push(
-                            new Paragraph({
-                              children: htmlToWordElements(element.innerHTML),
-                              spacing: { after: 200 }
-                            })
-                          )
-                        }
-                        break
-                      case 'div':
-                        // Process div content recursively
-                        if (element.childNodes.length > 0) {
-                          element.childNodes.forEach(child => processHtmlElement(child))
-                        } else if (textContent.trim()) {
-                          elements.push(
-                            new Paragraph({
-                              children: htmlToWordElements(element.innerHTML),
-                              spacing: { after: 200 }
-                            })
-                          )
-                        }
-                        break
-                      default:
-                        // Handle other elements by processing their children or as paragraphs
-                        if (element.childNodes.length > 0) {
-                          element.childNodes.forEach(child => processHtmlElement(child))
-                        } else if (textContent.trim()) {
-                          elements.push(
-                            new Paragraph({
-                              children: htmlToWordElements(element.innerHTML),
-                              spacing: { after: 200 }
-                            })
-                          )
-                        }
-                    }
-                  } else if (node.nodeType === Node.TEXT_NODE && node.textContent?.trim()) {
-                    // Handle loose text nodes
-                    elements.push(
-                      new Paragraph({
-                        children: [new TextRun({ text: node.textContent, size: 24 })],
-                        spacing: { after: 200 }
-                      })
-                    )
-                  }
-                }
-                
-                // Process each child element
-                tempDiv.childNodes.forEach(processHtmlElement)
-              }
-            } else if (part.type === 'table') {
-              // Add table
-              const tableData = part.content as string[][]
-              if (tableData.length > 0) {
-                const tableRows = tableData.map((row) => 
-                  new TableRow({
-                    children: row.map(cell => 
-                      new TableCell({
-                        children: [
-                          new Paragraph({
-                            children: htmlToWordElements(cell)
-                          })
-                        ]
-                      })
-                    )
-                  })
-                )
-                
-                elements.push(
-                  new Table({
-                    rows: tableRows,
-                    width: {
-                      size: 100,
-                      type: 'pct'
-                    }
-                  })
-                )
-                
-                elements.push(
-                  new Paragraph({
-                    children: [new TextRun({ text: '' })],
-                    spacing: { after: 200 }
-                  })
-                )
-              }
-            }
-          })
+          // Process section content
+          if (section.content && section.content.trim()) {
+            const contentElements = processHtmlToWordParagraphs(section.content)
+            elements.push(...contentElements)
+          }
           
           return elements
         })

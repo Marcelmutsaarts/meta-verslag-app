@@ -2,57 +2,89 @@ import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import mammoth from 'mammoth'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-
 export async function POST(request: NextRequest) {
   try {
+    // Check if API key exists
+    if (!process.env.GEMINI_API_KEY) {
+      console.error('GEMINI_API_KEY is not set in environment variables')
+      return NextResponse.json({ 
+        error: 'API configuratie fout. Controleer de environment variabelen.',
+        details: 'GEMINI_API_KEY ontbreekt'
+      }, { status: 500 })
+    }
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
     const formData = await request.formData()
-    const file = formData.get('file') as File
+    const fileCount = parseInt(formData.get('fileCount') as string) || 0
     const instructions = formData.get('instructions') as string
     const educationLevel = formData.get('educationLevel') as string
     const teacherName = formData.get('teacherName') as string
     const assignmentTitle = formData.get('assignmentTitle') as string
+    const mode = formData.get('mode') as string || 'final' // 'preview' or 'final'
+    const customSections = formData.get('customSections') as string // JSON string of custom sections
 
-    if (!file) {
-      return NextResponse.json({ error: 'Geen bestand geüpload' }, { status: 400 })
+    if (fileCount === 0) {
+      return NextResponse.json({ error: 'Geen bestanden geüpload' }, { status: 400 })
     }
 
-    // Extract text from document
-    const buffer = Buffer.from(await file.arrayBuffer())
-    let documentText = ''
+    // Extract text from all documents
+    const documents: Array<{ name: string, content: string }> = []
+    let totalTextLength = 0
 
-    console.log('File type:', file.type)
-    console.log('File name:', file.name)
-
-    if (file.type === 'application/pdf') {
-      try {
-        const pdfParse = (await import('pdf-parse')).default
-        const pdfData = await pdfParse(buffer)
-        documentText = pdfData.text
-      } catch (pdfError) {
-        console.error('PDF parsing error:', pdfError)
-        return NextResponse.json({ error: 'Fout bij het lezen van het PDF bestand' }, { status: 400 })
+    for (let i = 0; i < fileCount; i++) {
+      const file = formData.get(`file_${i}`) as File
+      if (!file) {
+        console.warn(`File ${i} not found in form data`)
+        continue
       }
-    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      const result = await mammoth.extractRawText({ buffer })
-      documentText = result.value
-    } else {
-      // Fallback: try to read as text if no specific type matches
-      try {
-        documentText = buffer.toString('utf-8')
-      } catch {
-        return NextResponse.json({ error: 'Onbekend bestandsformaat. Gebruik PDF of DOCX.' }, { status: 400 })
+
+      console.log(`Processing file ${i}: ${file.name} (${file.type})`)
+
+      const buffer = Buffer.from(await file.arrayBuffer())
+      let documentText = ''
+
+      if (file.type === 'application/pdf') {
+        try {
+          const pdfParse = (await import('pdf-parse')).default
+          const pdfData = await pdfParse(buffer)
+          documentText = pdfData.text
+        } catch (pdfError) {
+          console.error('PDF parsing error:', pdfError)
+          return NextResponse.json({ error: `Fout bij het lezen van PDF bestand: ${file.name}` }, { status: 400 })
+        }
+      } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        const result = await mammoth.extractRawText({ buffer })
+        documentText = result.value
+      } else {
+        // Fallback: try to read as text if no specific type matches
+        try {
+          documentText = buffer.toString('utf-8')
+        } catch {
+          return NextResponse.json({ error: `Onbekend bestandsformaat voor ${file.name}. Gebruik PDF, DOCX of TXT.` }, { status: 400 })
+        }
       }
+
+      if (!documentText || documentText.trim().length === 0) {
+        console.warn(`No text found in ${file.name}`)
+        continue
+      }
+
+      documents.push({
+        name: file.name,
+        content: documentText.trim()
+      })
+      
+      totalTextLength += documentText.length
     }
 
-    if (!documentText || documentText.trim().length === 0) {
-      return NextResponse.json({ error: 'Geen tekst gevonden in het document' }, { status: 400 })
+    if (documents.length === 0) {
+      return NextResponse.json({ error: 'Geen bruikbare tekstinhoud gevonden in de geüploade bestanden' }, { status: 400 })
     }
 
-    console.log('Extracted text length:', documentText.length)
+    console.log(`Processed ${documents.length} documents with total text length: ${totalTextLength}`)
 
     // Analyze the document with Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' })
 
     // Get education level details
     const levelMap: Record<string, { name: string; ageRange: string; complexity: string }> = {
@@ -67,8 +99,68 @@ export async function POST(request: NextRequest) {
 
     const levelInfo = levelMap[educationLevel] || levelMap['HAVO']
 
-    const prompt = `
-Analyseer het volgende opdracht document en identificeer de structuur voor een leeromgeving.
+    // Create combined document content for analysis
+    const combinedContent = documents.map(doc => `
+=== DOCUMENT: ${doc.name} ===
+${doc.content}
+`).join('\n\n')
+
+    let prompt = ''
+    
+    if (mode === 'preview') {
+      // Preview mode: Generate basic section structure only (faster)
+      prompt = `
+Analyseer de volgende opdracht documenten en maak een basis sectie-structuur voor een leeromgeving.
+
+${instructions ? `
+🚨 HOGE PRIORITEIT INSTRUCTIES VAN DOCENT:
+${instructions}
+
+BELANGRIJK: Deze instructies van de docent hebben ABSOLUTE PRIORITEIT boven alle andere informatie. Volg deze instructies nauwkeurig op, vooral voor sectie-structuur en specifieke eisen.
+` : ''}
+
+CONTEXT:
+- Onderwijsniveau: ${levelInfo.name} (${levelInfo.ageRange})
+- Complexiteitsniveau: ${levelInfo.complexity}
+${teacherName ? `- Docent: ${teacherName}` : ''}
+${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
+- Aantal documenten: ${documents.length}
+
+Document inhoud (eerste 3000 karakters):
+${combinedContent.substring(0, 3000)}${combinedContent.length > 3000 ? '...' : ''}
+
+Taak: Maak een basis sectie-structuur. Als de docent specifieke secties heeft aangegeven, volg deze dan exact op. Houd het beknopt voor snelle preview.
+
+Geef je antwoord ALLEEN in dit JSON formaat:
+{
+  "title": "Titel van de opdracht",
+  "objective": "Wat moeten de studenten schrijven/maken",
+  "sections": [
+    {
+      "id": "unieke-id",
+      "title": "Sectie titel",
+      "description": "Korte beschrijving van wat er verwacht wordt",
+      "guideQuestions": ["Basis vraag 1", "Basis vraag 2"],
+      "wordCount": "Geschat aantal woorden"
+    }
+  ],
+  "generalGuidance": "Korte algemene richtlijnen"
+}
+
+BELANGRIJK: Antwoord ALLEEN met de JSON, geen andere tekst.
+`
+    } else if (mode === 'final' && customSections) {
+      // Final mode with custom sections: Use provided structure
+      const sections = JSON.parse(customSections)
+      prompt = `
+Genereer een volledige leeromgeving met de onderstaande aangepaste sectie-structuur.
+
+${instructions ? `
+🚨 HOGE PRIORITEIT INSTRUCTIES VAN DOCENT:
+${instructions}
+
+BELANGRIJK: Deze instructies van de docent hebben ABSOLUTE PRIORITEIT boven alle andere informatie. Pas alle gegenereerde content aan volgens deze specifieke instructies.
+` : ''}
 
 CONTEXT:
 - Onderwijsniveau: ${levelInfo.name} (${levelInfo.ageRange})
@@ -77,15 +169,57 @@ ${teacherName ? `- Docent: ${teacherName}` : ''}
 ${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
 
 Document inhoud:
-${documentText}
+${combinedContent}
 
-${instructions ? `Aanvullende instructies van de docent: ${instructions}` : ''}
+AANGEPASTE SECTIE-STRUCTUUR (door docent bepaald):
+${JSON.stringify(sections, null, 2)}
+
+Taak: Gebruik EXACT de bovenstaande sectie-structuur en vul deze aan met:
+1. Uitgebreide beschrijvingen per sectie
+2. Socratische hulpvragen die aansluiten bij de sectie-inhoud
+3. Specifieke richtlijnen gebaseerd op de documenten
+
+Geef je antwoord in dit JSON formaat met de EXACTE sectie-structuur:
+{
+  "title": "Titel van de opdracht",
+  "objective": "Wat moeten de studenten schrijven/maken",  
+  "sections": [gebruik EXACT de aangepaste secties met uitgebreide descriptions en guideQuestions],
+  "generalGuidance": "Uitgebreide richtlijnen voor de opdracht"
+}
+
+BELANGRIJK: 
+- Behoud EXACT de sectie IDs en titels uit de aangepaste structuur
+- Vul alleen descriptions en guideQuestions uitgebreid aan
+- Antwoord ALLEEN met de JSON
+`
+    } else {
+      // Final mode: Full analysis (original behavior)
+      prompt = `
+Analyseer de volgende opdracht documenten en identificeer de structuur voor een leeromgeving.
+
+${instructions ? `
+🚨 HOGE PRIORITEIT INSTRUCTIES VAN DOCENT:
+${instructions}
+
+BELANGRIJK: Deze instructies van de docent hebben ABSOLUTE PRIORITEIT boven alle andere informatie. Als de docent specifieke secties of structuur aangeeft, volg deze dan nauwkeurig op.
+` : ''}
+
+CONTEXT:
+- Onderwijsniveau: ${levelInfo.name} (${levelInfo.ageRange})
+- Complexiteitsniveau: ${levelInfo.complexity}
+${teacherName ? `- Docent: ${teacherName}` : ''}
+${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
+- Aantal documenten: ${documents.length}
+
+Document inhoud:
+${combinedContent}
 
 Taak:
-1. Identificeer wat de leerlingen/studenten moeten schrijven
-2. Bepaal de standaard secties van de opdracht
-3. Geef per sectie een beschrijving van wat er verwacht wordt
-4. Pas de complexiteit en taal aan het onderwijsniveau aan
+1. EERST: Check of de docent specifieke instructies heeft gegeven voor de sectie-indeling
+2. Identificeer wat de leerlingen/studenten moeten schrijven
+3. Bepaal de secties van de opdracht (gebruik docent instructies als beschikbaar)
+4. Geef per sectie een beschrijving van wat er verwacht wordt
+5. Pas de complexiteit en taal aan het onderwijsniveau aan
 
 BELANGRIJK: Houd rekening met het onderwijsniveau (${levelInfo.name}) bij:
 - De formulering van sectie-beschrijvingen
@@ -116,8 +250,18 @@ Zorg ervoor dat:
 - De guide questions socratisch van aard zijn (stellen vragen, geven geen antwoorden)
 - De structuur aansluit bij het type opdracht
 `
+    }
 
-    const result = await model.generateContent(prompt)
+    console.log('Sending request to Gemini API...')
+    
+    let result
+    try {
+      result = await model.generateContent(prompt)
+    } catch (geminiError) {
+      console.error('Gemini API error:', geminiError)
+      throw new Error(`Gemini API fout: ${geminiError instanceof Error ? geminiError.message : 'Onbekende fout'}`)
+    }
+    
     const responseText = result.response.text()
     
     console.log('Gemini response:', responseText)

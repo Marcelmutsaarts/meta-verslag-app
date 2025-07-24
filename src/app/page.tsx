@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { estimateTokens, formatTokenCount, getTokenCountColor, isWithinTokenLimit } from '@/utils/tokenCounter'
 
 const educationLevels = [
   { value: 'PO', label: 'Primair Onderwijs (PO)', description: 'Basisschool, groep 1-8' },
@@ -13,32 +14,103 @@ const educationLevels = [
   { value: 'UNI', label: 'Universiteit', description: 'Wetenschappelijk onderwijs' }
 ]
 
+interface FileWithContent {
+  file: File
+  content: string
+  tokens: number
+}
+
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<FileWithContent[]>([])
   const [additionalInstructions, setAdditionalInstructions] = useState('')
   const [educationLevel, setEducationLevel] = useState('HAVO')
   const [teacherName, setTeacherName] = useState('')
   const [assignmentTitle, setAssignmentTitle] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [totalTokens, setTotalTokens] = useState(0)
   const router = useRouter()
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0]
-      const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-      
-      if (validTypes.includes(selectedFile.type)) {
-        setFile(selectedFile)
-      } else {
-        alert('Alleen PDF en DOCX bestanden zijn toegestaan')
-      }
+  // Update total tokens when files change
+  useEffect(() => {
+    const total = files.reduce((sum, file) => sum + file.tokens, 0)
+    setTotalTokens(total)
+  }, [files])
+
+  const extractTextFromFile = async (file: File): Promise<string> => {
+    // For client-side, we'll estimate token count by file size
+    // Actual text extraction will happen on the server
+    if (file.type === 'text/plain') {
+      return await file.text()
     }
+    
+    // Very conservative estimates - better to underestimate than overestimate
+    let estimatedChars = 0
+    const fileSizeKB = file.size / 1024
+    
+    if (file.type === 'application/pdf') {
+      // PDFs: Very conservative - assume mostly formatting, little text
+      estimatedChars = Math.max(100, Math.min(fileSizeKB * 50, 10000))
+    } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      // DOCX: Conservative estimate with cap
+      estimatedChars = Math.max(200, Math.min(fileSizeKB * 150, 15000))
+    }
+    
+    // Return placeholder text for token counting (will be replaced on server)
+    return 'x'.repeat(estimatedChars)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return
+    
+    const selectedFiles = Array.from(e.target.files)
+    const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+    
+    for (const selectedFile of selectedFiles) {
+      if (!validTypes.includes(selectedFile.type)) {
+        alert(`Bestand ${selectedFile.name}: Alleen PDF, DOCX en TXT bestanden zijn toegestaan`)
+        continue
+      }
+      
+      // Check if file already exists
+      if (files.some(f => f.file.name === selectedFile.name)) {
+        alert(`Bestand ${selectedFile.name} is al toegevoegd`)
+        continue
+      }
+      
+      try {
+        const content = await extractTextFromFile(selectedFile)
+        const tokens = estimateTokens(content)
+        
+        const newFile: FileWithContent = {
+          file: selectedFile,
+          content,
+          tokens
+        }
+        
+        setFiles(prev => [...prev, newFile])
+      } catch (error) {
+        console.error('Error reading file:', error)
+        alert(`Fout bij het lezen van ${selectedFile.name}`)
+      }
+    }
+    
+    // Reset input
+    e.target.value = ''
+  }
+
+  const removeFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleSubmit = async (e: React.FormEvent, mode: 'preview' | 'final' = 'final') => {
     e.preventDefault()
-    if (!file) {
-      alert('Upload eerst een opdracht document')
+    if (files.length === 0) {
+      alert('Upload eerst minimaal één opdracht document')
+      return
+    }
+
+    if (!isWithinTokenLimit(totalTokens)) {
+      alert(`Te veel tokens: ${totalTokens}. Maximum is 20,000 tokens.`)
       return
     }
 
@@ -46,11 +118,55 @@ export default function Home() {
 
     try {
       const formData = new FormData()
-      formData.append('file', file)
+      
+      // Add all files
+      files.forEach((fileWithContent, index) => {
+        formData.append(`file_${index}`, fileWithContent.file)
+      })
+      
+      // Add metadata
+      formData.append('fileCount', files.length.toString())
       formData.append('instructions', additionalInstructions)
       formData.append('educationLevel', educationLevel)
       formData.append('teacherName', teacherName)
       formData.append('assignmentTitle', assignmentTitle)
+      formData.append('mode', mode)
+
+      // Store form data for potential final generation later
+      if (mode === 'preview') {
+        const formDataForStorage = {
+          fileCount: files.length,
+          instructions: additionalInstructions,
+          educationLevel,
+          teacherName,
+          assignmentTitle
+        }
+        
+        // Convert files to base64 for storage
+        const filePromises = files.map(async (fileWithContent, i) => {
+          const file = fileWithContent.file
+          const reader = new FileReader()
+          const base64 = await new Promise<string>((resolve) => {
+            reader.onload = () => resolve(reader.result as string)
+            reader.readAsDataURL(file)
+          })
+          return {
+            index: i,
+            data: {
+              name: file.name,
+              type: file.type,
+              data: base64.split(',')[1] // Remove data:mime;base64, prefix
+            }
+          }
+        })
+        
+        const fileResults = await Promise.all(filePromises)
+        fileResults.forEach(({ index, data }) => {
+          formDataForStorage[`file_${index}`] = data
+        })
+        
+        sessionStorage.setItem('uploadFormData', JSON.stringify(formDataForStorage))
+      }
 
       const response = await fetch('/api/analyze-assignment', {
         method: 'POST',
@@ -63,9 +179,16 @@ export default function Home() {
       if (response.ok) {
         const data = await response.json()
         console.log('Received data:', data)
-        sessionStorage.setItem('assignmentData', JSON.stringify(data))
-        console.log('Data stored in sessionStorage, redirecting to /workspace')
-        router.push('/workspace')
+        
+        if (mode === 'preview') {
+          sessionStorage.setItem('previewData', JSON.stringify(data))
+          console.log('Preview data stored, redirecting to /preview')
+          router.push('/preview')
+        } else {
+          sessionStorage.setItem('assignmentData', JSON.stringify(data))
+          console.log('Data stored in sessionStorage, redirecting to /workspace')
+          router.push('/workspace')
+        }
       } else {
         const errorText = await response.text()
         console.error('Error response:', errorText)
@@ -153,80 +276,193 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              {/* Document Upload */}
+              {/* Multiple Document Upload */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload opdracht document *
-                </label>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Upload opdracht documenten *
+                  </label>
+                  <div className={`text-sm font-medium ${getTokenCountColor(totalTokens)}`}>
+                    {formatTokenCount(totalTokens)}
+                  </div>
+                </div>
+                
+                {/* Token limit warning */}
+                {totalTokens > 15000 && (
+                  <div className="mb-4 p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <p className="text-sm text-yellow-700">
+                          {totalTokens >= 20000 
+                            ? 'Token limiet overschreden! Verwijder documenten om door te gaan.'
+                            : 'Bijna aan de token limiet. Houd rekening met de 20,000 token limiet.'
+                          }
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-indigo-400 transition-colors">
                   <input
                     type="file"
-                    accept=".pdf,.docx"
+                    accept=".pdf,.docx,.txt"
                     onChange={handleFileChange}
                     className="hidden"
                     id="file-upload"
+                    multiple
                   />
                   <label
                     htmlFor="file-upload"
                     className="cursor-pointer"
                   >
-                    {file ? (
-                      <div className="text-green-600">
-                        <svg className="mx-auto h-12 w-12 mb-2" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                        </svg>
-                        <p className="font-medium">{file.name}</p>
-                        <p className="text-sm text-gray-500">Klik om een ander bestand te kiezen</p>
-                      </div>
-                    ) : (
-                      <div className="text-gray-500">
-                        <svg className="mx-auto h-12 w-12 mb-2" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                          <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        <p className="font-medium">Klik om een bestand te uploaden</p>
-                        <p className="text-sm">PDF of DOCX (max. 10MB)</p>
-                      </div>
-                    )}
+                    <div className="text-gray-500">
+                      <svg className="mx-auto h-12 w-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <p className="font-medium">Klik om documenten toe te voegen</p>
+                      <p className="text-sm">PDF, DOCX of TXT bestanden (meerdere selecteren mogelijk)</p>
+                    </div>
                   </label>
                 </div>
+                
+                {/* File List */}
+                {files.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700">Geüploade documenten:</h4>
+                    {files.map((fileWithContent, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center space-x-3">
+                          <div className="flex-shrink-0">
+                            {/* File type icon */}
+                            <svg className="h-8 w-8 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                            </svg>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {fileWithContent.file.name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {fileWithContent.tokens.toLocaleString()} tokens • {(fileWithContent.file.size / 1024).toFixed(1)} KB
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(index)}
+                          className="flex-shrink-0 ml-4 p-1 text-gray-400 hover:text-red-500 transition-colors"
+                          title="Verwijder bestand"
+                        >
+                          <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9zM4 5a2 2 0 012-2h8a2 2 0 012 2v6a2 2 0 01-2 2H6a2 2 0 01-2-2V5zM8 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Additional Instructions */}
+              {/* Additional Instructions - Enhanced */}
               <div>
                 <label htmlFor="instructions" className="block text-sm font-medium text-gray-700 mb-2">
-                  Aanvullende instructies (optioneel)
+                  Aanvullende instructies (hoge prioriteit voor AI)
                 </label>
+                
+                {/* Information Box */}
+                <div className="mb-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start">
+                    <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium mb-1">💡 Tip voor betere resultaten:</p>
+                      <p>Als de sectie-structuur niet duidelijk uit de documenten blijkt, geef dan hier de gewenste indeling aan. Bijvoorbeeld:</p>
+                      <p className="font-mono text-xs mt-2 bg-blue-100 p-2 rounded">
+                        "Maak secties voor: 1. Inleiding, 2. Literatuuronderzoek, 3. Methodologie, 4. Resultaten, 5. Conclusie"
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 <textarea
                   id="instructions"
-                  rows={4}
+                  rows={5}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                  placeholder="Geef hier eventuele aanvullende instructies voor de leeromgeving..."
+                  placeholder="Geef hier structuurinstructies of andere belangrijke richtlijnen die de AI moet volgen. Deze instructies krijgen hoge prioriteit bij het analyseren van uw documenten..."
                   value={additionalInstructions}
                   onChange={(e) => setAdditionalInstructions(e.target.value)}
                 />
+                
+                {/* Character/Priority Indicator */}
+                {additionalInstructions.trim() && (
+                  <div className="mt-2 flex items-center justify-between text-sm">
+                    <span className="text-green-600 font-medium flex items-center">
+                      <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      Hoge prioriteit instructies ingesteld
+                    </span>
+                    <span className="text-gray-500">
+                      {additionalInstructions.length} karakters
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <button
-                type="submit"
-                disabled={!file || isAnalyzing}
-                className={`w-full py-3 px-6 rounded-lg font-semibold text-white transition-all ${
-                  !file || isAnalyzing
-                    ? 'bg-gray-400 cursor-not-allowed'
-                    : 'bg-indigo-600 hover:bg-indigo-700 transform hover:scale-105'
-                }`}
-              >
-                {isAnalyzing ? (
-                  <span className="flex items-center justify-center">
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Opdracht wordt geanalyseerd...
-                  </span>
-                ) : (
-                  'Genereer Leeromgeving'
-                )}
-              </button>
+              {/* Action Buttons */}
+              <div className="flex space-x-4">
+                <button
+                  type="button"
+                  onClick={(e) => handleSubmit(e, 'preview')}
+                  disabled={files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)}
+                  className={`flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all ${
+                    files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-yellow-600 hover:bg-yellow-700 transform hover:scale-105'
+                  }`}
+                >
+                  {isAnalyzing ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Analyseren...
+                    </span>
+                  ) : (
+                    '🔍 Test Structuur'
+                  )}
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)}
+                  className={`flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all ${
+                    files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 transform hover:scale-105'
+                  }`}
+                >
+                  {isAnalyzing ? (
+                    <span className="flex items-center justify-center">
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Opdracht wordt geanalyseerd...
+                    </span>
+                  ) : (
+                    '🚀 Genereer Leeromgeving'
+                  )}
+                </button>
+              </div>
             </form>
 
             <div className="mt-8 p-4 bg-blue-50 rounded-lg">
