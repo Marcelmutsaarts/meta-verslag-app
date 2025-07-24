@@ -134,7 +134,7 @@ export default function Home() {
 
       // Store form data for potential final generation later
       if (mode === 'preview') {
-        const formDataForStorage = {
+        const formDataForStorage: any = {
           fileCount: files.length,
           instructions: additionalInstructions,
           educationLevel,
@@ -385,7 +385,7 @@ export default function Home() {
                       <p className="font-medium mb-1">💡 Tip voor betere resultaten:</p>
                       <p>Als de sectie-structuur niet duidelijk uit de documenten blijkt, geef dan hier de gewenste indeling aan. Bijvoorbeeld:</p>
                       <p className="font-mono text-xs mt-2 bg-blue-100 p-2 rounded">
-                        "Maak secties voor: 1. Inleiding, 2. Literatuuronderzoek, 3. Methodologie, 4. Resultaten, 5. Conclusie"
+                        &quot;Maak secties voor: 1. Inleiding, 2. Literatuuronderzoek, 3. Methodologie, 4. Resultaten, 5. Conclusie&quot;
                       </p>
                     </div>
                   </div>

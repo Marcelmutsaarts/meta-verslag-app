@@ -185,7 +185,7 @@ export default function WorkspacePage() {
         loginTime: new Date().toISOString()
       })
       
-      setAssignmentData(studentWork.assignmentData)
+      setAssignmentData(studentWork.assignmentData as AssignmentData)
       setSectionContents(studentWork.sectionContents)
       
       // Set first section as selected

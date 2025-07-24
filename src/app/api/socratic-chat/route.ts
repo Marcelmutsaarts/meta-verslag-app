@@ -61,7 +61,6 @@ export async function POST(request: NextRequest) {
       message, 
       currentSection, 
       currentContent, 
-      allSectionContents, 
       sectionProgress,
       assignmentContext, 
       metadata 
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
     const readableContent = contentToText(currentContent || '')
     
     // Process all section contents for cross-section awareness
-    const allSectionsContext = sectionProgress ? sectionProgress.map(section => ({
+    const allSectionsContext = sectionProgress ? sectionProgress.map((section: any) => ({
       ...section,
       readableContent: contentToText(section.content || '')
     })) : []
@@ -79,7 +78,7 @@ export async function POST(request: NextRequest) {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' })
 
     // Create a comprehensive overview of all sections for context
-    const sectionsOverview = allSectionsContext.length > 0 ? allSectionsContext.map(section => 
+    const sectionsOverview = allSectionsContext.length > 0 ? allSectionsContext.map((section: any) => 
       `${section.isCurrentSection ? '>>> HUIDIGE SECTIE <<<' : ''}
 Sectie: "${section.title}"
 Beschrijving: ${section.description}
