@@ -16,7 +16,8 @@
       "Bash(pkill:*)",
       "Bash(npm cache clean:*)",
       "Bash(npx next dev:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(echo:*)"
     ],
     "deny": []
   }

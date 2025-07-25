@@ -22,6 +22,8 @@ export async function POST(request: NextRequest) {
     const assignmentTitle = formData.get('assignmentTitle') as string
     const mode = formData.get('mode') as string || 'final' // 'preview' or 'final'
     const customSections = formData.get('customSections') as string // JSON string of custom sections
+    const formativeAssessmentData = formData.get('formativeAssessment') as string
+    const exampleFileCount = parseInt(formData.get('exampleFileCount') as string) || 0
 
     if (fileCount === 0) {
       return NextResponse.json({ error: 'Geen bestanden geüpload' }, { status: 400 })
@@ -83,6 +85,67 @@ export async function POST(request: NextRequest) {
 
     console.log(`Processed ${documents.length} documents with total text length: ${totalTextLength}`)
 
+    // Process formative assessment data
+    let formativeAssessment = null
+    const exampleDocuments: Array<{ name: string, content: string }> = []
+    
+    if (formativeAssessmentData) {
+      try {
+        formativeAssessment = JSON.parse(formativeAssessmentData)
+        console.log('Formative assessment enabled:', formativeAssessment.enabled)
+        
+        // Process example files if provided
+        if (exampleFileCount > 0 && 
+            formativeAssessment.enabled &&
+            formativeAssessment.strategies.exampleBasedLearning.enabled &&
+            formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'teacher-provided') {
+          
+          for (let i = 0; i < exampleFileCount; i++) {
+            const exampleFile = formData.get(`exampleFile_${i}`) as File
+            if (!exampleFile) continue
+            
+            console.log(`Processing example file ${i}: ${exampleFile.name} (${exampleFile.type})`)
+            
+            const buffer = Buffer.from(await exampleFile.arrayBuffer())
+            let exampleText = ''
+            
+            if (exampleFile.type === 'application/pdf') {
+              try {
+                const pdfParse = (await import('pdf-parse')).default
+                const pdfData = await pdfParse(buffer)
+                exampleText = pdfData.text
+              } catch (pdfError) {
+                console.error('Example PDF parsing error:', pdfError)
+                continue
+              }
+            } else if (exampleFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+              const result = await mammoth.extractRawText({ buffer })
+              exampleText = result.value
+            } else {
+              try {
+                exampleText = buffer.toString('utf-8')
+              } catch {
+                console.error(`Could not process example file ${exampleFile.name}`)
+                continue
+              }
+            }
+            
+            if (exampleText && exampleText.trim().length > 0) {
+              exampleDocuments.push({
+                name: exampleFile.name,
+                content: exampleText.trim()
+              })
+            }
+          }
+          
+          console.log(`Processed ${exampleDocuments.length} example documents`)
+        }
+      } catch (error) {
+        console.error('Error parsing formative assessment data:', error)
+        formativeAssessment = null
+      }
+    }
+
     // Analyze the document with Gemini
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' })
 
@@ -104,6 +167,56 @@ export async function POST(request: NextRequest) {
 === DOCUMENT: ${doc.name} ===
 ${doc.content}
 `).join('\n\n')
+
+    // Helper function to generate formative assessment prompt section
+    const getFormativeAssessmentPrompt = () => {
+      if (!formativeAssessment || !formativeAssessment.enabled) return ''
+      
+      let assessmentPrompt = `\n\n🎯 FORMATIEF HANDELEN INSTRUCTIES:\n`
+      assessmentPrompt += `De docent heeft formatief handelen ingeschakeld met de volgende strategieën:\n\n`
+      
+      if (formativeAssessment.strategies.personalLearningGoals.enabled) {
+        assessmentPrompt += `📝 PERSOONLIJKE LEERDOELEN:\n`
+        assessmentPrompt += `- Scope: ${formativeAssessment.strategies.personalLearningGoals.scope === 'per-section' ? 'Per sectie' : 'Hele opdracht'}\n`
+        
+        if (formativeAssessment.strategies.personalLearningGoals.customPrompt) {
+          assessmentPrompt += `- Aangepaste prompt: "${formativeAssessment.strategies.personalLearningGoals.customPrompt}"\n`
+        } else {
+          const defaultPrompt = formativeAssessment.strategies.personalLearningGoals.scope === 'per-section' 
+            ? 'Beschrijf in 2-3 zinnen wat je persoonlijk wilt leren van deze sectie.'
+            : 'Beschrijf in 2-3 zinnen wat je persoonlijk wilt leren van deze opdracht.'
+          assessmentPrompt += `- Standaard prompt: "${defaultPrompt}"\n`
+        }
+        assessmentPrompt += `\n`
+      }
+      
+      if (formativeAssessment.strategies.exampleBasedLearning.enabled) {
+        assessmentPrompt += `📚 VOORBEELDGERICHT LEREN:\n`
+        assessmentPrompt += `- Bron: ${formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'ai-generated' ? 'AI-gegenereerde voorbeelden' : 'Door docent aangeleverde voorbeelden'}\n`
+        
+        if (formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'teacher-provided' && exampleDocuments.length > 0) {
+          assessmentPrompt += `- Voorbeelddocumenten (${exampleDocuments.length}):\n`
+          exampleDocuments.forEach(doc => {
+            assessmentPrompt += `  * ${doc.name}: ${doc.content.substring(0, 200)}${doc.content.length > 200 ? '...' : ''}\n`
+          })
+        }
+        
+        if (formativeAssessment.strategies.exampleBasedLearning.customReflectionQuestions) {
+          assessmentPrompt += `- Aangepaste reflectievragen: "${formativeAssessment.strategies.exampleBasedLearning.customReflectionQuestions}"\n`
+        } else {
+          assessmentPrompt += `- Standaard reflectievragen: "Wat vind je goed aan dit voorbeeld? Waarom denk je dat dit effectief is? Hoe kun je dit toepassen in je eigen werk?"\n`
+        }
+        assessmentPrompt += `\n`
+      }
+      
+      assessmentPrompt += `BELANGRIJK: Integreer deze formatieve strategieën in de leeromgeving door:\n`
+      assessmentPrompt += `1. Voor persoonlijke leerdoelen: Voeg de juiste prompts toe aan de begin van relevante secties\n`
+      assessmentPrompt += `2. Voor voorbeeldgericht leren: Zorg dat studenten eerst het voorbeeld analyseren voordat ze zelf schrijven\n`
+      assessmentPrompt += `3. Pas de sectie-beschrijvingen aan om deze strategieën te ondersteunen\n`
+      assessmentPrompt += `4. Zorg dat de socratische vragen rekening houden met deze formatieve elementen\n\n`
+      
+      return assessmentPrompt
+    }
 
     let prompt = ''
     
@@ -128,7 +241,7 @@ ${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
 
 Document inhoud (eerste 3000 karakters):
 ${combinedContent.substring(0, 3000)}${combinedContent.length > 3000 ? '...' : ''}
-
+${getFormativeAssessmentPrompt()}
 Taak: Maak een basis sectie-structuur. Als de docent specifieke secties heeft aangegeven, volg deze dan exact op. Houd het beknopt voor snelle preview.
 
 Geef je antwoord ALLEEN in dit JSON formaat:
@@ -173,7 +286,7 @@ ${combinedContent}
 
 AANGEPASTE SECTIE-STRUCTUUR (door docent bepaald):
 ${JSON.stringify(sections, null, 2)}
-
+${getFormativeAssessmentPrompt()}
 Taak: Gebruik EXACT de bovenstaande sectie-structuur en vul deze aan met:
 1. Uitgebreide beschrijvingen per sectie
 2. Socratische hulpvragen die aansluiten bij de sectie-inhoud
@@ -213,7 +326,7 @@ ${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
 
 Document inhoud:
 ${combinedContent}
-
+${getFormativeAssessmentPrompt()}
 Taak:
 1. EERST: Check of de docent specifieke instructies heeft gegeven voor de sectie-indeling
 2. Identificeer wat de leerlingen/studenten moeten schrijven
@@ -310,6 +423,8 @@ Zorg ervoor dat:
         teacherName: teacherName || null,
         assignmentTitle: assignmentTitle || null,
         instructions: instructions || null,
+        formativeAssessment: formativeAssessment || null,
+        exampleDocuments: exampleDocuments.length > 0 ? exampleDocuments : null,
         createdAt: new Date().toISOString()
       }
     }

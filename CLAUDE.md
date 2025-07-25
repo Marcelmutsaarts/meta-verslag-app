@@ -20,6 +20,14 @@ Meta-Verslag-App is an AI-powered educational tool that transforms assignment do
 - **JSON Export/Import**: Students can save and restore their complete work sessions
 - **Cross-Session Continuity**: Resume work on any device with saved JSON files
 
+### Advanced Formative Assessment System
+- **Personal Learning Goals**: Students set section-specific or assignment-wide learning objectives
+- **Example-Based Learning**: AI-generated or teacher-provided examples with reflection workflows
+- **Socratic Reflection Dialogue**: Integrated chat system that challenges students to think deeper
+- **Context-Aware Examples**: Teachers can provide specific context for targeted example generation
+- **Multi-Section Example Distribution**: Examples for all sections are correctly parsed and distributed
+- **Comprehensive Context Integration**: Chatbot has access to all learning goals, reflections, and examples
+
 ## Development Commands
 
 ```bash
@@ -66,7 +74,8 @@ Get API key from: https://makersuite.google.com/app/apikey
 
 ### Core Educational APIs
 - `/api/analyze-assignment`: Document → structured learning environment
-- `/api/socratic-chat`: Context-aware educational guidance
+- `/api/socratic-chat`: Context-aware educational guidance with comprehensive formative assessment integration
+- `/api/generate-example`: Context-aware example generation with multi-section parsing and distribution
 
 ### Inherited Multi-Modal Features (from template)
 - `/api/chat`: Multi-modal AI conversations
@@ -89,11 +98,21 @@ The `/api/socratic-chat` endpoint is meta-prompted to:
 - Reference section-specific guide questions when relevant
 - Maintain context awareness of current section and student progress
 - Encourage self-discovery through questioning
+- **NEW**: Integrate with formative assessment data (learning goals, reflections, examples)
+- **NEW**: Provide reflection-deepening dialogue within the same modal interface
+- **NEW**: Access comprehensive student context across all sections and formative activities
 
-### Data Flow for Student Work
+### Enhanced Data Flow for Student Work
 1. **Session Management**: Assignment data stored in sessionStorage after analysis
 2. **Progress Persistence**: Student writing auto-saved to localStorage per section
-3. **Context Awareness**: Chat bot receives current section content for personalized guidance
+3. **Formative State Management**: Learning goals, reflections, and examples persisted in localStorage
+4. **Comprehensive Context Awareness**: Chat bot receives:
+   - Current section content and progress
+   - All finalized and draft learning goals (per-section or whole-assignment)
+   - All student reflections on examples across sections
+   - Available examples and their content
+   - Cross-section progress and content awareness
+5. **Integrated Reflection Workflow**: Reflection dialogue happens within the same modal as reflection input
 
 ## File Processing Capabilities
 

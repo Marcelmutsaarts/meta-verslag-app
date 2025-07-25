@@ -20,6 +20,23 @@ interface FileWithContent {
   tokens: number
 }
 
+interface FormativeAssessment {
+  enabled: boolean
+  strategies: {
+    personalLearningGoals: {
+      enabled: boolean
+      scope: 'per-section' | 'whole-report'
+      customPrompt: string
+    }
+    exampleBasedLearning: {
+      enabled: boolean
+      exampleSource: 'ai-generated' | 'teacher-provided'
+      exampleFiles: File[]
+      customReflectionQuestions: string
+    }
+  }
+}
+
 export default function Home() {
   const [files, setFiles] = useState<FileWithContent[]>([])
   const [additionalInstructions, setAdditionalInstructions] = useState('')
@@ -28,6 +45,26 @@ export default function Home() {
   const [assignmentTitle, setAssignmentTitle] = useState('')
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [totalTokens, setTotalTokens] = useState(0)
+  
+  // Formative Assessment State
+  const [formativeAssessment, setFormativeAssessment] = useState<FormativeAssessment>({
+    enabled: false,
+    strategies: {
+      personalLearningGoals: {
+        enabled: false,
+        scope: 'per-section',
+        customPrompt: ''
+      },
+      exampleBasedLearning: {
+        enabled: false,
+        exampleSource: 'ai-generated',
+        exampleFiles: [],
+        customReflectionQuestions: ''
+      }
+    }
+  })
+  const [assessmentCollapsed, setAssessmentCollapsed] = useState(true)
+  
   const router = useRouter()
 
   // Update total tokens when files change
@@ -131,6 +168,19 @@ export default function Home() {
       formData.append('teacherName', teacherName)
       formData.append('assignmentTitle', assignmentTitle)
       formData.append('mode', mode)
+      formData.append('formativeAssessment', JSON.stringify(formativeAssessment))
+
+      // Add example files for formative assessment if provided
+      if (formativeAssessment.enabled && 
+          formativeAssessment.strategies.exampleBasedLearning.enabled &&
+          formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'teacher-provided' &&
+          formativeAssessment.strategies.exampleBasedLearning.exampleFiles.length > 0) {
+        
+        formativeAssessment.strategies.exampleBasedLearning.exampleFiles.forEach((file, index) => {
+          formData.append(`exampleFile_${index}`, file)
+        })
+        formData.append('exampleFileCount', formativeAssessment.strategies.exampleBasedLearning.exampleFiles.length.toString())
+      }
 
       // Store form data for potential final generation later
       if (mode === 'preview') {
@@ -139,7 +189,8 @@ export default function Home() {
           instructions: additionalInstructions,
           educationLevel,
           teacherName,
-          assignmentTitle
+          assignmentTitle,
+          formativeAssessment: formativeAssessment
         }
         
         // Convert files to base64 for storage
@@ -164,6 +215,35 @@ export default function Home() {
         fileResults.forEach(({ index, data }) => {
           formDataForStorage[`file_${index}`] = data
         })
+        
+        // Handle example files for formative assessment
+        if (formativeAssessment.enabled && 
+            formativeAssessment.strategies.exampleBasedLearning.enabled &&
+            formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'teacher-provided' &&
+            formativeAssessment.strategies.exampleBasedLearning.exampleFiles.length > 0) {
+          
+          const exampleFilePromises = formativeAssessment.strategies.exampleBasedLearning.exampleFiles.map(async (file, i) => {
+            const reader = new FileReader()
+            const base64 = await new Promise<string>((resolve) => {
+              reader.onload = () => resolve(reader.result as string)
+              reader.readAsDataURL(file)
+            })
+            return {
+              index: i,
+              data: {
+                name: file.name,
+                type: file.type,
+                data: base64.split(',')[1] // Remove data:mime;base64, prefix
+              }
+            }
+          })
+          
+          const exampleFileResults = await Promise.all(exampleFilePromises)
+          exampleFileResults.forEach(({ index, data }) => {
+            formDataForStorage[`exampleFile_${index}`] = data
+          })
+          formDataForStorage.exampleFileCount = formativeAssessment.strategies.exampleBasedLearning.exampleFiles.length
+        }
         
         sessionStorage.setItem('uploadFormData', JSON.stringify(formDataForStorage))
       }
@@ -208,6 +288,58 @@ export default function Home() {
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  // Formative Assessment Handlers
+  const handleAssessmentToggle = (enabled: boolean) => {
+    setFormativeAssessment(prev => ({ ...prev, enabled }))
+  }
+
+  const handleStrategyToggle = (strategy: keyof FormativeAssessment['strategies'], enabled: boolean) => {
+    setFormativeAssessment(prev => ({
+      ...prev,
+      strategies: {
+        ...prev.strategies,
+        [strategy]: {
+          ...prev.strategies[strategy],
+          enabled
+        }
+      }
+    }))
+  }
+
+  const handleStrategyUpdate = (
+    strategy: keyof FormativeAssessment['strategies'], 
+    updates: Partial<FormativeAssessment['strategies'][typeof strategy]>
+  ) => {
+    setFormativeAssessment(prev => ({
+      ...prev,
+      strategies: {
+        ...prev.strategies,
+        [strategy]: {
+          ...prev.strategies[strategy],
+          ...updates
+        }
+      }
+    }))
+  }
+
+  const handleExampleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return
+    
+    const selectedFiles = Array.from(e.target.files)
+    const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
+    
+    const validFiles = selectedFiles.filter(file => {
+      if (!validTypes.includes(file.type)) {
+        alert(`Bestand ${file.name}: Alleen PDF, DOCX en TXT bestanden zijn toegestaan voor voorbeelden`)
+        return false
+      }
+      return true
+    })
+
+    handleStrategyUpdate('exampleBasedLearning', { exampleFiles: validFiles })
+    e.target.value = '' // Reset input
   }
 
   return (
@@ -412,6 +544,235 @@ export default function Home() {
                     <span className="text-gray-500">
                       {additionalInstructions.length} karakters
                     </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Formative Assessment Options */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setAssessmentCollapsed(!assessmentCollapsed)}
+                  className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-3 hover:text-gray-900 transition-colors"
+                >
+                  <span className="flex items-center">
+                    <svg className="w-5 h-5 text-purple-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M9.504 1.132a1 1 0 01.992 0l1.75 1a1 1 0 11-.992 1.736L10 3.152l-1.254.716a1 1 0 11-.992-1.736l1.75-1zM5.618 4.504a1 1 0 01-.372 1.364L5.016 6l.23.132a1 1 0 11-.992 1.736L3 7.723V8a1 1 0 01-2 0V6a.996.996 0 01.52-.878l3-1.75a1 1 0 011.098.132zm8.764 0a1 1 0 011.098-.132l3 1.75A.996.996 0 0119 6v2a1 1 0 11-2 0v-.277l-1.254.145a1 1 0 11-.992-1.736L15.984 6l-.23-.132a1 1 0 01-.372-1.364zm-7 4a1 1 0 011.364.372L10 10.054l1.254-.716a1 1 0 11.992 1.736L11 11.777V12a1 1 0 11-2 0v-.223l-1.246-.707a1 1 0 01-.372-1.364zm2.236 4.504a1 1 0 01.992 0l1.75 1a1 1 0 01-.372 1.868L10 15.277l-1.254.277a1 1 0 01-.372-1.868l1.75-1z" clipRule="evenodd" />
+                    </svg>
+                    Formatief Handelen (Optioneel)
+                  </span>
+                  <svg 
+                    className={`w-4 h-4 transition-transform duration-200 ${
+                      assessmentCollapsed ? 'rotate-0' : 'rotate-180'
+                    }`} 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {!assessmentCollapsed && (
+                  <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
+                    {/* Main Toggle */}
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-800">Formatief Handelen Inschakelen</h3>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Voeg actieve leerstrategieën toe om studenten bewuster te laten leren
+                        </p>
+                      </div>
+                      <label className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={formativeAssessment.enabled}
+                          onChange={(e) => handleAssessmentToggle(e.target.checked)}
+                          className="sr-only"
+                        />
+                        <div className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none ${
+                          formativeAssessment.enabled ? 'bg-purple-600' : 'bg-gray-300'
+                        }`}>
+                          <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${
+                            formativeAssessment.enabled ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                        </div>
+                      </label>
+                    </div>
+
+                    {formativeAssessment.enabled && (
+                      <div className="space-y-6">
+                        {/* Personal Learning Goals Strategy */}
+                        <div className="bg-white p-4 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className="font-medium text-gray-800">🎯 Persoonlijke Leerdoelen</h4>
+                              <p className="text-sm text-gray-600">
+                                Studenten schrijven hun persoonlijke leerdoel voor de opdracht
+                              </p>
+                            </div>
+                            <label className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={formativeAssessment.strategies.personalLearningGoals.enabled}
+                                onChange={(e) => handleStrategyToggle('personalLearningGoals', e.target.checked)}
+                                className="sr-only"
+                              />
+                              <div className={`relative inline-flex items-center h-5 rounded-full w-9 transition-colors ${
+                                formativeAssessment.strategies.personalLearningGoals.enabled ? 'bg-purple-500' : 'bg-gray-300'
+                              }`}>
+                                <span className={`inline-block w-3 h-3 transform bg-white rounded-full transition-transform ${
+                                  formativeAssessment.strategies.personalLearningGoals.enabled ? 'translate-x-5' : 'translate-x-1'
+                                }`} />
+                              </div>
+                            </label>
+                          </div>
+
+                          {formativeAssessment.strategies.personalLearningGoals.enabled && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Wanneer leerdoelen instellen?
+                                </label>
+                                <div className="space-y-2">
+                                  <label className="flex items-center">
+                                    <input
+                                      type="radio"
+                                      name="learningGoalScope"
+                                      value="per-section"
+                                      checked={formativeAssessment.strategies.personalLearningGoals.scope === 'per-section'}
+                                      onChange={(e) => handleStrategyUpdate('personalLearningGoals', { scope: e.target.value as 'per-section' })}
+                                      className="mr-2"
+                                    />
+                                    <span className="text-sm text-gray-700">Per sectie (student stelt doel per onderdeel)</span>
+                                  </label>
+                                  <label className="flex items-center">
+                                    <input
+                                      type="radio"
+                                      name="learningGoalScope"
+                                      value="whole-report"
+                                      checked={formativeAssessment.strategies.personalLearningGoals.scope === 'whole-report'}
+                                      onChange={(e) => handleStrategyUpdate('personalLearningGoals', { scope: e.target.value as 'whole-report' })}
+                                      className="mr-2"
+                                    />
+                                    <span className="text-sm text-gray-700">Hele opdracht (één hoofddoel voor hele verslag)</span>
+                                  </label>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label htmlFor="customPrompt" className="block text-sm font-medium text-gray-700 mb-2">
+                                  Aangepaste prompt (optioneel)
+                                </label>
+                                <textarea
+                                  id="customPrompt"
+                                  rows={2}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                  placeholder="Bijv.: 'Beschrijf in 2-3 zinnen wat je met deze opdracht wilt leren en waarom dit belangrijk voor je is...'"
+                                  value={formativeAssessment.strategies.personalLearningGoals.customPrompt}
+                                  onChange={(e) => handleStrategyUpdate('personalLearningGoals', { customPrompt: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Example-Based Learning Strategy */}
+                        <div className="bg-white p-4 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className="font-medium text-gray-800">📝 Voorbeeldgericht Leren</h4>
+                              <p className="text-sm text-gray-600">
+                                Studenten analyseren een goed voorbeeld en reflecteren hierop
+                              </p>
+                            </div>
+                            <label className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={formativeAssessment.strategies.exampleBasedLearning.enabled}
+                                onChange={(e) => handleStrategyToggle('exampleBasedLearning', e.target.checked)}
+                                className="sr-only"
+                              />
+                              <div className={`relative inline-flex items-center h-5 rounded-full w-9 transition-colors ${
+                                formativeAssessment.strategies.exampleBasedLearning.enabled ? 'bg-purple-500' : 'bg-gray-300'
+                              }`}>
+                                <span className={`inline-block w-3 h-3 transform bg-white rounded-full transition-transform ${
+                                  formativeAssessment.strategies.exampleBasedLearning.enabled ? 'translate-x-5' : 'translate-x-1'
+                                }`} />
+                              </div>
+                            </label>
+                          </div>
+
+                          {formativeAssessment.strategies.exampleBasedLearning.enabled && (
+                            <div className="space-y-3">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                  Bron van voorbeelden
+                                </label>
+                                <div className="space-y-2">
+                                  <label className="flex items-center">
+                                    <input
+                                      type="radio"
+                                      name="exampleSource"
+                                      value="ai-generated"
+                                      checked={formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'ai-generated'}
+                                      onChange={(e) => handleStrategyUpdate('exampleBasedLearning', { exampleSource: e.target.value as 'ai-generated' })}
+                                      className="mr-2"
+                                    />
+                                    <span className="text-sm text-gray-700">AI-gegenereerde voorbeelden</span>
+                                  </label>
+                                  <label className="flex items-center">
+                                    <input
+                                      type="radio"
+                                      name="exampleSource"
+                                      value="teacher-provided"
+                                      checked={formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'teacher-provided'}
+                                      onChange={(e) => handleStrategyUpdate('exampleBasedLearning', { exampleSource: e.target.value as 'teacher-provided' })}
+                                      className="mr-2"
+                                    />
+                                    <span className="text-sm text-gray-700">Door docent aangeleverd</span>
+                                  </label>
+                                </div>
+                              </div>
+
+                              {formativeAssessment.strategies.exampleBasedLearning.exampleSource === 'teacher-provided' && (
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Upload voorbeelddocumenten
+                                  </label>
+                                  <input
+                                    type="file"
+                                    accept=".pdf,.docx,.txt"
+                                    onChange={handleExampleFileChange}
+                                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+                                    multiple
+                                  />
+                                  {formativeAssessment.strategies.exampleBasedLearning.exampleFiles.length > 0 && (
+                                    <div className="mt-2 text-sm text-green-600">
+                                      {formativeAssessment.strategies.exampleBasedLearning.exampleFiles.length} bestand(en) geselecteerd
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div>
+                                <label htmlFor="reflectionQuestions" className="block text-sm font-medium text-gray-700 mb-2">
+                                  Aangepaste reflectievragen (optioneel)
+                                </label>
+                                <textarea
+                                  id="reflectionQuestions"
+                                  rows={2}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                  placeholder="Bijv.: 'Wat vind je goed aan dit voorbeeld? Waarom denk je dat dit effectief is? Hoe kun je dit toepassen in je eigen werk?'"
+                                  value={formativeAssessment.strategies.exampleBasedLearning.customReflectionQuestions}
+                                  onChange={(e) => handleStrategyUpdate('exampleBasedLearning', { customReflectionQuestions: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
