@@ -100,6 +100,8 @@ export default function WorkspacePage() {
       active: false,
       scope: 'current-section' as 'current-section' | 'all-sections',
       targetSections: [] as string[],
+      questions: [] as any[],
+      answers: {} as Record<string, any>,
       chatMessages: [] as Array<{role: string, content: string}>,
       chatInput: '',
       isLoading: false
@@ -321,10 +323,12 @@ export default function WorkspacePage() {
         },
         quiz: {
           active: false,
+          scope: 'current-section' as 'current-section' | 'all-sections',
+          targetSections: [] as string[],
           questions: [],
           answers: {},
           isLoading: false,
-          chatMessages: [],
+          chatMessages: [] as Array<{role: string, content: string}>,
           chatInput: ''
         }
       }
