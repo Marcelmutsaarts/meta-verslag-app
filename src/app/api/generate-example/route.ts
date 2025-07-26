@@ -3,11 +3,99 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
+// Helper function to calculate text similarity using Levenshtein distance
+function calculateTextSimilarity(text1: string, text2: string): number {
+  const longer = text1.length > text2.length ? text1 : text2
+  const shorter = text1.length > text2.length ? text2 : text1
+  
+  if (longer.length === 0) return 1.0
+  
+  const editDistance = levenshteinDistance(longer, shorter)
+  return (longer.length - editDistance) / longer.length
+}
+
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix = []
+  
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i]
+  }
+  
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j
+  }
+  
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1]
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        )
+      }
+    }
+  }
+  
+  return matrix[str2.length][str1.length]
+}
+
+// Helper function to extract keywords from section title and description
+function extractKeywords(title: string, description: string): string[] {
+  const stopWords = new Set(['de', 'het', 'een', 'en', 'van', 'voor', 'in', 'op', 'met', 'aan', 'bij', 'te', 'is', 'zijn', 'was', 'waren', 'heeft', 'hebben', 'had', 'hadden'])
+  
+  const text = `${title} ${description || ''}`.toLowerCase()
+  const words = text.match(/\b\w{3,}\b/g) || []
+  
+  return words.filter(word => !stopWords.has(word))
+}
+
+// Helper function to find content boundaries based on keyword density
+function findContentBoundaries(content: string, keywords: string[], nextSection: any): { start: number, end: number } {
+  if (keywords.length === 0) return { start: -1, end: -1 }
+  
+  const sentences = content.split(/[.!?]+/).filter(s => s.trim().length > 20)
+  let bestStart = -1
+  let bestEnd = -1
+  let maxDensity = 0
+  
+  // Find the span of sentences with highest keyword density
+  for (let start = 0; start < sentences.length; start++) {
+    for (let end = start + 1; end <= sentences.length; end++) {
+      const span = sentences.slice(start, end).join(' ').toLowerCase()
+      const keywordCount = keywords.reduce((count, keyword) => {
+        return count + (span.match(new RegExp(keyword, 'g')) || []).length
+      }, 0)
+      
+      const density = keywordCount / (end - start)
+      
+      if (density > maxDensity) {
+        maxDensity = density
+        bestStart = content.indexOf(sentences[start])
+        bestEnd = end < sentences.length ? content.indexOf(sentences[end]) : content.length
+      }
+    }
+  }
+  
+  return { start: bestStart, end: bestEnd }
+}
+
 export async function POST(request: NextRequest) {
+  console.log('=== GENERATE EXAMPLE API CALLED ===')
+  console.log('Request method:', request.method)
+  console.log('Request URL:', request.url)
+  console.log('Timestamp:', new Date().toISOString())
+  
   try {
+    console.log('Parsing request body...')
     const body = await request.json()
+    console.log('Request body parsed successfully')
+    
     const { 
       scope, // 'current-section' | 'all-sections'
+      sectionId, // Section ID for current section
       currentSection,
       allSections,
       assignmentContext,
@@ -15,6 +103,19 @@ export async function POST(request: NextRequest) {
       formativeAssessment,
       customContext
     } = body
+    
+    console.log('Request parameters:', {
+      scope,
+      sectionId,
+      hasCurrentSection: !!currentSection,
+      currentSectionId: currentSection?.id,
+      currentSectionTitle: currentSection?.title,
+      allSectionsCount: allSections?.length || 0,
+      hasAssignmentContext: !!assignmentContext,
+      hasMetadata: !!metadata,
+      hasFormativeAssessment: !!formativeAssessment,
+      customContextLength: customContext?.length || 0
+    })
 
     if (!scope || !assignmentContext) {
       return NextResponse.json(
@@ -76,7 +177,7 @@ SECTIE INFORMATIE:
 - Titel: ${currentSection.title}
 - Beschrijving: ${currentSection.description}
 - Richtlijn woordaantal: ${currentSection.wordCount || 'Niet gespecificeerd'}
-- Hulpvragen: ${currentSection.guideQuestions.join(', ')}
+- Hulpvragen: ${currentSection.guideQuestions?.join(', ') || 'Geen hulpvragen'}
 
 BELANGRIJKE INSTRUCTIES:
 1. Genereer een VOLLEDIG UITGEWERKT voorbeeld van hoe deze sectie eruit zou kunnen zien
@@ -112,7 +213,7 @@ ${allSections.map((section: any, index: number) => `
 ${index + 1}. ${section.title}
    - Beschrijving: ${section.description}
    - Woordaantal: ${section.wordCount || 'Niet gespecificeerd'}
-   - Hulpvragen: ${section.guideQuestions.join(', ')}
+   - Hulpvragen: ${section.guideQuestions?.join(', ') || 'Geen hulpvragen'}
 `).join('')}
 
 BELANGRIJKE INSTRUCTIES:
@@ -145,126 +246,206 @@ Genereer nu een concreet, uitgewerkt voorbeeld van het complete verslag:
 `
     }
 
-    console.log('Generating example with scope:', scope)
+    console.log('=== SENDING REQUEST TO GEMINI API ===')
+    console.log('Scope:', scope)
+    console.log('Prompt length:', prompt.length)
+    console.log('Model being used: gemini-2.5-flash-preview-05-20')
     
-    const result = await model.generateContent(prompt)
+    let result
+    try {
+      console.log('Calling model.generateContent()...')
+      result = await model.generateContent(prompt)
+      console.log('Gemini API call completed successfully')
+    } catch (geminiError) {
+      console.error('=== GEMINI API ERROR ===')
+      console.error('Error type:', typeof geminiError)
+      console.error('Error message:', geminiError instanceof Error ? geminiError.message : String(geminiError))
+      console.error('Error stack:', geminiError instanceof Error ? geminiError.stack : 'No stack')
+      console.error('Full error object:', geminiError)
+      throw new Error(`Gemini API fout: ${geminiError instanceof Error ? geminiError.message : 'Onbekende fout'}`)
+    }
+    
+    console.log('Extracting response text...')
     const exampleContent = result.response.text()
-    
     console.log('Generated example length:', exampleContent.length)
+    console.log('Example content preview:', exampleContent.substring(0, 200) + '...')
 
-    // Parse the example for multi-section content if needed
+    // Enhanced parsing for multi-section content
     let parsedExample
     if (scope === 'all-sections') {
-      parsedExample = {}
+      parsedExample = {} as Record<string, string>
       
-      console.log('Parsing multi-section example...')
+      console.log('=== ENHANCED MULTI-SECTION PARSING ===')
+      console.log('Content length:', exampleContent.length)
+      console.log('Number of sections expected:', allSections.length)
       
-      // First try: split by markdown headers (# Title)
-      const headerSections = exampleContent.split(/^# /gm).filter(Boolean)
-      console.log('Found header sections:', headerSections.length)
-      
-      if (headerSections.length > 0) {
-        allSections.forEach((section: any) => {
-          // Look for exact section title match first
-          let matchingSection = headerSections.find(s => {
-            const firstLine = s.split('\n')[0].trim()
-            return firstLine.toLowerCase() === section.title.toLowerCase()
-          })
-          
-          // If no exact match, try partial matching
-          if (!matchingSection) {
-            const sectionTitle = section.title.toLowerCase()
-            matchingSection = headerSections.find(s => {
-              const firstLine = s.split('\n')[0].toLowerCase()
-              return firstLine.includes(sectionTitle) || sectionTitle.includes(firstLine)
-            })
+      // Strategy 1: Advanced markdown header parsing with flexible matching
+      const enhancedHeaderParsing = () => {
+        console.log('Strategy 1: Enhanced header parsing...')
+        
+        // Split by various header patterns
+        const headerPatterns = [
+          /^#{1,3}\s+(.+?)$/gm,  // Standard markdown headers
+          /^(.+?)\n[=-]{3,}$/gm,  // Underlined headers
+          /^\d+\.\s+(.+?)$/gm,    // Numbered headers
+        ]
+        
+        let bestMatch: Record<string, string> = {}
+        let bestScore = 0
+        
+        headerPatterns.forEach(pattern => {
+          const matches: RegExpExecArray[] = []
+          let match: RegExpExecArray | null
+          while ((match = pattern.exec(exampleContent)) !== null) {
+            matches.push(match)
+            if (!pattern.global) break
           }
+          pattern.lastIndex = 0 // Reset for next use
+          console.log(`Pattern matches found:`, matches.length)
           
-          if (matchingSection) {
-            const lines = matchingSection.split('\n')
-            const content = lines.slice(1).join('\n').trim()
-            if (content.length > 30) {
-              parsedExample[section.id] = content
-              console.log(`Matched section "${section.title}" by title`)
+          if (matches.length > 0) {
+            const tempParsed: Record<string, string> = {}
+            let score = 0
+            
+            matches.forEach((match, index) => {
+              const headerText = match[1].trim()
+              const startPos = match.index!
+              const nextMatch = matches[index + 1]
+              const endPos = nextMatch ? nextMatch.index! : exampleContent.length
+              
+              // Extract content between headers
+              let content = exampleContent.substring(startPos, endPos)
+              content = content.replace(match[0], '').trim() // Remove header itself
+              
+              // Find best matching section
+              const matchingSection = allSections.find((section: any) => {
+                const similarity = calculateTextSimilarity(headerText.toLowerCase(), section.title.toLowerCase())
+                return similarity > 0.6 // 60% similarity threshold
+              })
+              
+              if (matchingSection && content.length > 50) {
+                tempParsed[matchingSection.id] = content
+                score += content.length
+                console.log(`Matched "${headerText}" → "${matchingSection.title}"`)
+              }
+            })
+            
+            if (score > bestScore) {
+              bestMatch = tempParsed
+              bestScore = score
             }
           }
         })
+        
+        return Object.keys(bestMatch).length >= allSections.length * 0.6 ? bestMatch : {}
       }
       
-      // If header parsing didn't work well, try alternative splitting
-      if (Object.keys(parsedExample).length < allSections.length / 2) {
-        console.log('Header parsing failed, trying alternative methods...')
-        parsedExample = {}
+      // Strategy 2: Smart content segmentation based on section keywords
+      const keywordBasedParsing = () => {
+        console.log('Strategy 2: Keyword-based parsing...')
         
-        // Try splitting by section titles in text
-        let remainingContent = exampleContent
+        const segments: Record<string, string> = {}
+        const processedContent = exampleContent
+        
+        // Create keyword clusters for each section
         allSections.forEach((section: any, index: number) => {
+          const keywords = extractKeywords(section.title, section.description)
           const nextSection = allSections[index + 1]
           
-          // Look for section title in content
-          const titlePattern = new RegExp(`\\b${section.title}\\b`, 'i')
-          const titleMatch = remainingContent.search(titlePattern)
+          // Find content boundaries using keyword density
+          const boundaries = findContentBoundaries(processedContent, keywords, nextSection)
           
-          if (titleMatch !== -1) {
-            let sectionEnd = remainingContent.length
-            
-            // Find where next section starts
-            if (nextSection) {
-              const nextTitlePattern = new RegExp(`\\b${nextSection.title}\\b`, 'i')
-              const nextMatch = remainingContent.search(nextTitlePattern)
-              if (nextMatch > titleMatch) {
-                sectionEnd = nextMatch
-              }
-            }
-            
-            // Extract content between current and next section
-            let sectionContent = remainingContent.substring(titleMatch, sectionEnd)
-            
-            // Clean up the content
-            sectionContent = sectionContent
-              .replace(new RegExp(`^.*${section.title}.*\n?`, 'i'), '') // Remove section header line
-              .replace(/^#+\s*.*$/gm, '') // Remove any remaining headers
-              .trim()
-            
-            if (sectionContent.length > 30) {
-              parsedExample[section.id] = sectionContent
-              console.log(`Matched section "${section.title}" by content search`)
+          if (boundaries.start !== -1 && boundaries.end !== -1) {
+            const content = processedContent.substring(boundaries.start, boundaries.end).trim()
+            if (content.length > 50) {
+              segments[section.id] = content
+              console.log(`Segmented content for "${section.title}": ${content.length} chars`)
             }
           }
         })
+        
+        return segments
       }
       
-      // Final fallback: distribute content evenly
-      if (Object.keys(parsedExample).length === 0) {
-        console.log('All parsing failed, distributing evenly...')
+      // Strategy 3: Improved proportional distribution
+      const intelligentDistribution = () => {
+        console.log('Strategy 3: Intelligent distribution...')
         
-        // Split content into paragraphs and distribute
-        const paragraphs = exampleContent
+        // Clean and segment content
+        const cleanedContent = exampleContent
+          .replace(/^#+\s+.*$/gm, '') // Remove headers
+          .replace(/\n{3,}/g, '\n\n') // Normalize spacing
+          .trim()
+        
+        // Split into meaningful chunks (sentences/paragraphs)
+        const sentences = cleanedContent
+          .split(/[.!?]+\s+/)
+          .filter(s => s.trim().length > 20)
+        
+        const paragraphs = cleanedContent
           .split(/\n\s*\n/)
           .filter(p => p.trim().length > 50)
         
-        const paragraphsPerSection = Math.ceil(paragraphs.length / allSections.length)
+        // Use the more appropriate segmentation
+        const chunks = paragraphs.length >= allSections.length ? paragraphs : sentences
+        console.log(`Using ${chunks.length} ${paragraphs.length >= allSections.length ? 'paragraphs' : 'sentences'} for distribution`)
         
-        allSections.forEach((section: any, index: number) => {
-          const startIdx = index * paragraphsPerSection
-          const endIdx = Math.min(startIdx + paragraphsPerSection, paragraphs.length)
-          const sectionParagraphs = paragraphs.slice(startIdx, endIdx)
+        const distribution: Record<string, string> = {}
+        
+        // Calculate target lengths based on section word counts
+        const totalWordCount = chunks.join(' ').split(/\s+/).length
+        const sectionWeights = allSections.map((section: any) => {
+          const targetWords = section.wordCount || Math.floor(totalWordCount / allSections.length)
+          return Math.max(targetWords, 100) // Minimum 100 words per section
+        })
+        
+        const totalWeight = sectionWeights.reduce((sum: number, weight: number) => sum + weight, 0)
+        
+        let chunkIndex = 0
+        allSections.forEach((section: any, sectionIndex: number) => {
+          const targetRatio = sectionWeights[sectionIndex] / totalWeight
+          const targetChunks = Math.max(1, Math.round(chunks.length * targetRatio))
           
-          if (sectionParagraphs.length > 0) {
-            parsedExample[section.id] = sectionParagraphs.join('\n\n').trim()
-            console.log(`Distributed content to section "${section.title}"`)
+          const sectionChunks = chunks.slice(chunkIndex, chunkIndex + targetChunks)
+          chunkIndex += targetChunks
+          
+          if (sectionChunks.length > 0) {
+            distribution[section.id] = sectionChunks.join('\n\n').trim()
+            console.log(`Distributed ${sectionChunks.length} chunks to "${section.title}"`)
           }
         })
+        
+        return distribution
       }
       
-      console.log('Final parsed sections:', Object.keys(parsedExample).length)
+      // Apply parsing strategies in order of sophistication
+      parsedExample = enhancedHeaderParsing()
+      
+      if (Object.keys(parsedExample).length < allSections.length * 0.6) {
+        console.log('Header parsing insufficient, trying keyword-based parsing...')
+        const keywordResult = keywordBasedParsing()
+        if (Object.keys(keywordResult).length > Object.keys(parsedExample).length) {
+          parsedExample = keywordResult
+        }
+      }
+      
+      if (Object.keys(parsedExample).length < allSections.length * 0.6) {
+        console.log('Advanced parsing failed, using intelligent distribution...')
+        parsedExample = intelligentDistribution()
+      }
+      
+      console.log('=== PARSING COMPLETE ===')
+      console.log('Successfully parsed sections:', Object.keys(parsedExample).length)
+      console.log('Target sections:', allSections.length)
+      console.log('Success rate:', `${Math.round((Object.keys(parsedExample).length / allSections.length) * 100)}%`)
     } else {
+      const actualSectionId = currentSection?.id || sectionId || 'unknown-section'
       parsedExample = {
-        [currentSection.id]: exampleContent.trim()
+        [actualSectionId]: exampleContent.trim()
       }
     }
 
-    return NextResponse.json({
+    const responseData = {
       success: true,
       scope,
       examples: parsedExample,
@@ -273,10 +454,25 @@ Genereer nu een concreet, uitgewerkt voorbeeld van het complete verslag:
         wordCount: exampleContent.length / 5, // Rough estimate
         sectionsGenerated: Object.keys(parsedExample).length
       }
+    }
+    
+    console.log('=== EXAMPLE GENERATION SUCCESSFUL ===')
+    console.log('Response data:', {
+      success: responseData.success,
+      scope: responseData.scope,
+      sectionsGenerated: responseData.metadata.sectionsGenerated,
+      exampleKeys: Object.keys(parsedExample)
     })
+    
+    return NextResponse.json(responseData)
 
   } catch (error) {
-    console.error('Error generating example:', error)
+    console.error('=== EXAMPLE GENERATION ERROR ===')
+    console.error('Error type:', typeof error)
+    console.error('Error message:', error instanceof Error ? error.message : String(error))
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack')
+    console.error('Full error object:', error)
+    
     return NextResponse.json(
       { 
         error: 'Er ging iets mis bij het genereren van het voorbeeld',

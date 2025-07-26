@@ -3,6 +3,11 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import mammoth from 'mammoth'
 
 export async function POST(request: NextRequest) {
+  console.log('=== ANALYZE ASSIGNMENT API CALLED ===')
+  console.log('Request method:', request.method)
+  console.log('Request URL:', request.url)
+  console.log('Timestamp:', new Date().toISOString())
+  
   try {
     // Check if API key exists
     if (!process.env.GEMINI_API_KEY) {
@@ -12,9 +17,15 @@ export async function POST(request: NextRequest) {
         details: 'GEMINI_API_KEY ontbreekt'
       }, { status: 500 })
     }
+    
+    console.log('API key check passed')
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+    
+    console.log('Parsing form data...')
     const formData = await request.formData()
+    console.log('Form data parsed successfully')
+    
     const fileCount = parseInt(formData.get('fileCount') as string) || 0
     const instructions = formData.get('instructions') as string
     const educationLevel = formData.get('educationLevel') as string
@@ -24,6 +35,13 @@ export async function POST(request: NextRequest) {
     const customSections = formData.get('customSections') as string // JSON string of custom sections
     const formativeAssessmentData = formData.get('formativeAssessment') as string
     const exampleFileCount = parseInt(formData.get('exampleFileCount') as string) || 0
+    
+    console.log('Form data extracted:')
+    console.log('- fileCount:', fileCount)
+    console.log('- instructions length:', instructions?.length || 0)
+    console.log('- educationLevel:', educationLevel)
+    console.log('- mode:', mode)
+    console.log('- exampleFileCount:', exampleFileCount)
 
     if (fileCount === 0 && !instructions?.trim()) {
       return NextResponse.json({ error: 'Geen bestanden geüpload en geen toelichting gegeven' }, { status: 400 })
@@ -47,33 +65,98 @@ export async function POST(request: NextRequest) {
 
       if (file.type === 'application/pdf') {
         try {
-          const pdfParse = (await import('pdf-parse')).default
+          console.log(`Starting PDF parsing for: ${file.name} (${file.size} bytes)`)
           
-          // Enhanced PDF parsing
-          const pdfData = await pdfParse(buffer)
+          // Dynamic import with better error handling
+          let pdfParse
+          try {
+            pdfParse = (await import('pdf-parse')).default
+          } catch (importError) {
+            console.error('Failed to import pdf-parse:', importError)
+            return NextResponse.json({ 
+              error: `PDF parsing library niet beschikbaar`,
+              details: `Er is een probleem met de PDF verwerkings-library. Probeer het document als Word (.docx) of tekst (.txt) bestand te uploaden.`
+            }, { status: 500 })
+          }
+          
+          // Enhanced PDF parsing with multiple strategies
+          const pdfData = await pdfParse(buffer, {
+            // Normalize whitespace
+            normalizeWhitespace: true,
+            // Disable image parsing to avoid canvas issues
+            max: 0
+          })
           
           documentText = pdfData.text
           
-          // Additional validation for PDF content
+          // Comprehensive content validation
           if (!documentText || documentText.trim().length < 10) {
-            console.warn(`PDF ${file.name} appears to have minimal text content. Trying alternative extraction...`)
+            console.warn(`PDF ${file.name} has minimal text content (${documentText?.length || 0} chars). Trying fallback...`)
             
-            // Fallback: try without options
-            const fallbackPdfData = await pdfParse(buffer)
-            documentText = fallbackPdfData.text || ''
+            // Fallback strategy: parse without options
+            try {
+              const fallbackPdfData = await pdfParse(buffer)
+              documentText = fallbackPdfData.text || ''
+              console.log(`Fallback extraction result: ${documentText.length} chars`)
+            } catch (fallbackError) {
+              console.error('Fallback PDF parsing also failed:', fallbackError)
+              documentText = ''
+            }
           }
           
+          // Final validation
+          if (!documentText || documentText.trim().length < 10) {
+            console.warn(`PDF ${file.name} extraction unsuccessful. Content length: ${documentText?.length || 0}`)
+            return NextResponse.json({ 
+              error: `Geen tekst gevonden in PDF bestand: ${file.name}`,
+              details: `Het PDF bestand bevat mogelijk alleen afbeeldingen, is wachtwoord-beveiligd, of heeft een complex formaat. Probeer:
+              
+• Het bestand te converteren naar Word (.docx) of tekst (.txt)
+• Een andere PDF viewer/generator te gebruiken
+• Te controleren of het bestand niet beschadigd is
+• Het bestand opnieuw op te slaan als PDF`
+            }, { status: 400 })
+          }
+          
+          console.log(`PDF parsing successful for ${file.name}: ${documentText.length} characters extracted`)
+          
         } catch (pdfError) {
-          console.error('PDF parsing error:', pdfError)
-          console.error('PDF error details:', {
-            message: pdfError instanceof Error ? pdfError.message : 'Unknown error',
-            stack: pdfError instanceof Error ? pdfError.stack : 'No stack trace',
+          console.error('=== PDF PARSING ERROR ===')
+          console.error('Error type:', typeof pdfError)
+          console.error('Error message:', pdfError instanceof Error ? pdfError.message : 'Unknown error')
+          console.error('Error stack:', pdfError instanceof Error ? pdfError.stack : 'No stack trace')
+          console.error('File details:', {
             fileName: file.name,
-            fileSize: file.size
+            fileSize: file.size,
+            fileType: file.type
           })
+          
+          // Categorize error types for better user feedback
+          let userMessage = `Fout bij het lezen van PDF bestand: ${file.name}`
+          let userDetails = ''
+          
+          const errorMessage = pdfError instanceof Error ? pdfError.message.toLowerCase() : ''
+          
+          if (errorMessage.includes('canvas') || errorMessage.includes('node')) {
+            userDetails = `Er is een probleem met de PDF rendering engine. Dit kan gebeuren bij complexe PDF's met afbeeldingen. 
+
+Probeer:
+• Het bestand te converteren naar Word (.docx) 
+• Een eenvoudigere PDF te maken zonder afbeeldingen
+• Het bestand als tekst (.txt) op te slaan`
+          } else if (errorMessage.includes('password') || errorMessage.includes('encrypted')) {
+            userDetails = `Het PDF bestand is wachtwoord-beveiligd. Verwijder eerst de beveiliging en probeer opnieuw.`
+          } else if (errorMessage.includes('corrupted') || errorMessage.includes('invalid')) {
+            userDetails = `Het PDF bestand lijkt beschadigd te zijn. Probeer het bestand opnieuw te genereren of op te slaan.`
+          } else {
+            userDetails = `Onbekende PDF fout. Probeer het bestand in een ander formaat (.docx of .txt) te uploaden.
+
+Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende fout'}`
+          }
+          
           return NextResponse.json({ 
-            error: `Fout bij het lezen van PDF bestand: ${file.name}`,
-            details: `Het PDF bestand kan mogelijk beschadigd zijn of een ongewoon formaat hebben. Details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende fout'}`
+            error: userMessage,
+            details: userDetails
           }, { status: 400 })
         }
       } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
@@ -195,12 +278,25 @@ export async function POST(request: NextRequest) {
             
             if (exampleFile.type === 'application/pdf') {
               try {
+                console.log(`Parsing example PDF: ${exampleFile.name}`)
                 const pdfParse = (await import('pdf-parse')).default
-                const pdfData = await pdfParse(buffer)
+                const pdfData = await pdfParse(buffer, {
+                  normalizeWhitespace: true,
+                  max: 0 // Disable image parsing
+                })
                 exampleText = pdfData.text
+                
+                if (!exampleText || exampleText.trim().length < 10) {
+                  console.warn(`Example PDF ${exampleFile.name} has minimal content, skipping`)
+                  continue
+                }
               } catch (pdfError) {
                 console.error('Example PDF parsing error:', pdfError)
-                continue
+                console.error('Example file details:', {
+                  fileName: exampleFile.name,
+                  fileSize: exampleFile.size
+                })
+                continue // Skip this example file but continue with others
               }
             } else if (exampleFile.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
               const result = await mammoth.extractRawText({ buffer })
@@ -458,19 +554,29 @@ Zorg ervoor dat:
 `
     }
 
-    console.log('Sending request to Gemini API...')
+    console.log('=== SENDING REQUEST TO GEMINI API ===')
+    console.log('Prompt length:', prompt.length)
+    console.log('Model being used: gemini-2.5-flash-preview-05-20')
+    console.log('Request time:', new Date().toISOString())
     
     let result
     try {
+      console.log('Calling model.generateContent()...')
       result = await model.generateContent(prompt)
+      console.log('Gemini API call completed successfully')
     } catch (geminiError) {
-      console.error('Gemini API error:', geminiError)
+      console.error('=== GEMINI API ERROR ===')
+      console.error('Error type:', typeof geminiError)
+      console.error('Error message:', geminiError instanceof Error ? geminiError.message : String(geminiError))
+      console.error('Error stack:', geminiError instanceof Error ? geminiError.stack : 'No stack')
+      console.error('Full error object:', geminiError)
       throw new Error(`Gemini API fout: ${geminiError instanceof Error ? geminiError.message : 'Onbekende fout'}`)
     }
     
+    console.log('Extracting response text...')
     const responseText = result.response.text()
-    
-    console.log('Gemini response:', responseText)
+    console.log('Response text length:', responseText.length)
+    console.log('Response text preview:', responseText.substring(0, 200) + '...')
     
     // Try to extract JSON from response
     let analysisData
@@ -521,6 +627,11 @@ Zorg ervoor dat:
         createdAt: new Date().toISOString()
       }
     }
+    
+    console.log('=== FINAL RESPONSE READY ===')
+    console.log('Response data sections count:', responseData.sections?.length || 0)
+    console.log('Response data title:', responseData.title)
+    console.log('Sending successful response...')
     
     return NextResponse.json(responseData)
   } catch (error) {

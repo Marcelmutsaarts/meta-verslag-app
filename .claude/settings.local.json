@@ -17,7 +17,16 @@
       "Bash(npm cache clean:*)",
       "Bash(npx next dev:*)",
       "Bash(true)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(grep:*)",
+      "Bash(node:*)",
+      "Bash(npx eslint:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd /c:*)",
+      "Bash(start http://localhost:3001/workspace)",
+      "Bash(start http://localhost:3001/)"
     ],
     "deny": []
   }

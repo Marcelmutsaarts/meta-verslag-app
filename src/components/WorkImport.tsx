@@ -5,10 +5,10 @@ import { workspaceStorage, type StudentWork } from '@/utils/workspaceStorage'
 
 interface WorkImportProps {
   onImport: (studentWork: StudentWork) => void
-  onCancel?: () => void
+  onClose?: () => void
 }
 
-export default function WorkImport({ onImport, onCancel }: WorkImportProps) {
+export default function WorkImport({ onImport, onClose }: WorkImportProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -119,10 +119,10 @@ export default function WorkImport({ onImport, onCancel }: WorkImportProps) {
         </div>
         
         <div className="flex space-x-3 pt-6">
-          {onCancel && (
+          {onClose && (
             <button
               type="button"
-              onClick={onCancel}
+              onClick={onClose}
               className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               disabled={isLoading}
             >

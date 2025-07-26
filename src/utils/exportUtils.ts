@@ -24,11 +24,14 @@ interface AssignmentData {
 function processHtmlToWordParagraphs(html: string): Paragraph[] {
   if (!html) return []
   
-  // Debug logging
-  // if (html.includes('<li') || html.includes('•') || html.includes('1.')) {
-  //   alert('HTML being processed:\n\n' + html.substring(0, 500) + (html.length > 500 ? '...' : ''))
-  // }
-  console.log('Processing HTML for Word export:', html)
+  // Debug logging - enhanced to see what HTML is being processed
+  console.log('=== WORD EXPORT DEBUG ===')
+  console.log('Full HTML being processed:', html)
+  console.log('Contains <li:', html.includes('<li'))
+  console.log('Contains <ul:', html.includes('<ul'))
+  console.log('Contains <ol:', html.includes('<ol'))
+  console.log('Contains bullet •:', html.includes('•'))
+  console.log('HTML length:', html.length)
   
   const tempDiv = document.createElement('div')
   tempDiv.innerHTML = html
@@ -36,6 +39,7 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
   const paragraphs: Paragraph[] = []
   let currentListType: 'ul' | 'ol' | null = null
   let listItemIndex = 0
+  let listInstance = Math.floor(Math.random() * 1000) // Generate unique instance for each list
   
   // Extract all text content from a node, preserving formatting
   function extractAllContent(node: Node, parentFormatting: { bold?: boolean, italics?: boolean, underline?: boolean } = {}): TextRun[] {
@@ -89,14 +93,23 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element
       const tagName = element.tagName.toLowerCase()
+      console.log(`Processing element: ${tagName}`)
       
       switch (tagName) {
         case 'p':
         case 'div':
-          // Check if this div/p is inside a list item - if so, don't create a separate paragraph
-          if (!element.closest('li')) {
+          console.log(`Processing ${tagName}, checking if contains lists...`)
+          // Check if this div/p contains list elements
+          const containsLists = element.querySelector('ul, ol')
+          if (containsLists) {
+            console.log(`${tagName} contains lists, processing children directly`)
+            // If it contains lists, just process children (don't create text content)
+            node.childNodes.forEach(processNode)
+          } else if (!element.closest('li')) {
+            // Check if this div/p is inside a list item - if so, don't create a separate paragraph
             const textRuns = extractAllContent(node)
             if (textRuns.length > 0) {
+              console.log(`Creating paragraph from ${tagName} content`)
               paragraphs.push(new Paragraph({
                 children: textRuns,
                 spacing: { after: 200 }
@@ -104,6 +117,7 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
             }
           } else {
             // If inside a list item, just process children
+            console.log(`${tagName} inside list item, processing children`)
             node.childNodes.forEach(processNode)
           }
           break
@@ -126,6 +140,7 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
           break
           
         case 'ul':
+          console.log('Processing UL element')
           currentListType = 'ul'
           listItemIndex = 0
           node.childNodes.forEach(processNode)
@@ -133,8 +148,10 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
           break
           
         case 'ol':
+          console.log('Processing OL element')
           currentListType = 'ol'
           listItemIndex = 1
+          listInstance = Math.floor(Math.random() * 1000) // New instance for each list
           node.childNodes.forEach(processNode)
           currentListType = null
           break
@@ -142,28 +159,34 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
         case 'li':
           // Extract ALL content from the list item, including nested elements
           const listRuns = extractAllContent(node)
-          if (listRuns.length > 0 || node.textContent?.trim()) {
+          const textContent = node.textContent?.trim() || ''
+          console.log(`Processing LI element. Text: "${textContent}", Runs: ${listRuns.length}, List type: ${currentListType}`)
+          
+          if (listRuns.length > 0 || textContent) {
             // If no runs but has text content, create a run for it
-            const finalRuns = listRuns.length > 0 ? listRuns : [new TextRun({ text: node.textContent?.trim() || '', size: 24 })]
+            const finalRuns = listRuns.length > 0 ? listRuns : [new TextRun({ text: textContent, size: 24 })]
             
             if (currentListType === 'ul') {
+              console.log('Creating bullet list item')
               paragraphs.push(new Paragraph({
                 children: finalRuns,
                 bullet: { level: 0 },
                 spacing: { after: 100 }
               }))
             } else if (currentListType === 'ol') {
+              console.log('Creating numbered list item')
               paragraphs.push(new Paragraph({
                 children: finalRuns,
                 numbering: {
                   reference: 'default-numbering',
                   level: 0,
-                  instance: 0
+                  instance: listInstance
                 },
                 spacing: { after: 100 }
               }))
               listItemIndex++
             } else {
+              console.log('Creating fallback list item (no list context)')
               // Fallback for li outside of ul/ol
               paragraphs.push(new Paragraph({
                 children: [new TextRun({ text: '• ', size: 24 }), ...finalRuns],
@@ -191,13 +214,27 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
   
   tempDiv.childNodes.forEach(processNode)
   
+  console.log(`Processed ${paragraphs.length} paragraphs from HTML parsing`)
+  
   // Fallback: If no lists were found but the text suggests lists, try text-based detection
-  if (paragraphs.length === 0 || !html.includes('<ul') && !html.includes('<ol') && (html.includes('•') || html.match(/^\s*\d+\./m))) {
+  if (paragraphs.length === 0 || (!html.includes('<ul') && !html.includes('<ol') && (html.includes('•') || html.match(/^\s*\d+\./m)))) {
     console.log('No HTML lists found, trying text-based list detection')
-    return processTextBasedLists(html)
+    const textBasedResult = processTextBasedLists(html)
+    console.log(`Text-based processing returned ${textBasedResult.length} paragraphs`)
+    return textBasedResult
   }
   
-  console.log(`Processed ${paragraphs.length} paragraphs for Word export`)
+  // If we got paragraphs but they seem like they should contain lists, let's also try text-based
+  if (paragraphs.length > 0 && (html.includes('•') || html.match(/^\s*\d+\./m)) && !html.includes('<ul') && !html.includes('<ol')) {
+    console.log('HTML paragraphs found but no list tags, trying text-based approach as well')
+    const textBasedResult = processTextBasedLists(html)
+    if (textBasedResult.length > paragraphs.length) {
+      console.log('Text-based approach found more structure, using that instead')
+      return textBasedResult
+    }
+  }
+  
+  console.log(`Final result: ${paragraphs.length} paragraphs for Word export`)
   
   return paragraphs
 }
@@ -206,18 +243,29 @@ function processHtmlToWordParagraphs(html: string): Paragraph[] {
 function processTextBasedLists(html: string): Paragraph[] {
   const paragraphs: Paragraph[] = []
   
+  console.log('=== TEXT-BASED LIST DETECTION ===')
+  
   // First strip HTML tags to get plain text, but keep some structure
   const tempDiv = document.createElement('div')
   tempDiv.innerHTML = html
   const textContent = tempDiv.textContent || tempDiv.innerText || ''
   
+  console.log('Extracted text content:', textContent)
+  
   // Split into lines and process each line
   const lines = textContent.split('\n').map(line => line.trim()).filter(line => line.length > 0)
   
+  console.log('Lines to process:', lines)
+  
+  let currentNumberedInstance = Math.floor(Math.random() * 1000)
+  
   for (const line of lines) {
-    // Check for bullet list patterns
-    if (line.match(/^[•·▪▫◦‣⁃]\s+/) || line.match(/^[-*]\s+/)) {
-      const text = line.replace(/^[•·▪▫◦‣⁃\-*]\s*/, '')
+    console.log(`Processing line: "${line}"`)
+    
+    // Check for bullet list patterns - more comprehensive
+    if (line.match(/^[•·▪▫◦‣⁃]\s+/) || line.match(/^[-*]\s+/) || line.match(/^[\u2022\u2023\u25E6\u2043\u2219]\s+/)) {
+      const text = line.replace(/^[•·▪▫◦‣⁃\-*\u2022\u2023\u25E6\u2043\u2219]\s*/, '')
+      console.log(`Found bullet item: "${text}"`)
       if (text.trim()) {
         paragraphs.push(new Paragraph({
           children: [new TextRun({ text: text.trim(), size: 24 })],
@@ -229,13 +277,14 @@ function processTextBasedLists(html: string): Paragraph[] {
     // Check for numbered list patterns
     else if (line.match(/^\d+[\.)]\s+/)) {
       const text = line.replace(/^\d+[\.)]\s*/, '')
+      console.log(`Found numbered item: "${text}"`)
       if (text.trim()) {
         paragraphs.push(new Paragraph({
           children: [new TextRun({ text: text.trim(), size: 24 })],
           numbering: {
             reference: 'default-numbering',
             level: 0,
-            instance: 0
+            instance: currentNumberedInstance
           },
           spacing: { after: 100 }
         }))
@@ -243,6 +292,7 @@ function processTextBasedLists(html: string): Paragraph[] {
     }
     // Regular paragraph
     else if (line.trim()) {
+      console.log(`Found regular paragraph: "${line.trim()}"`)
       paragraphs.push(new Paragraph({
         children: [new TextRun({ text: line.trim(), size: 24 })],
         spacing: { after: 200 }
@@ -380,6 +430,8 @@ export function splitHtmlByTables(html: string): Array<{ type: 'text' | 'table',
 
 // Create Word document with rich content
 export async function createWordDocument(assignmentData: AssignmentData): Promise<Blob> {
+  console.log('Creating Word document with sections:', assignmentData.sections.length)
+  
   const doc = new Document({
     numbering: {
       config: [{
@@ -476,8 +528,12 @@ export async function createWordDocument(assignmentData: AssignmentData): Promis
           
           // Process section content
           if (section.content && section.content.trim()) {
+            console.log(`Processing content for section: ${section.title}`)
             const contentElements = processHtmlToWordParagraphs(section.content)
+            console.log(`Generated ${contentElements.length} elements for section: ${section.title}`)
             elements.push(...contentElements)
+          } else {
+            console.log(`No content for section: ${section.title}`)
           }
           
           return elements
@@ -510,7 +566,8 @@ interface ExportAssignmentData {
 // Export function for workspace data
 export async function exportAssignmentToWord(
   assignmentData: ExportAssignmentData,
-  sectionContents: Record<string, string>
+  sectionContents: Record<string, string>,
+  studentData?: { name: string; email?: string }
 ): Promise<void> {
   const exportData = {
     title: assignmentData.title,
@@ -530,9 +587,10 @@ export async function exportAssignmentToWord(
     const link = document.createElement('a')
     link.href = url
     
-    const fileName = assignmentData.metadata?.assignmentTitle 
-      ? `${assignmentData.metadata.assignmentTitle}.docx`
-      : `${assignmentData.title}.docx`
+    const baseFileName = assignmentData.metadata?.assignmentTitle || assignmentData.title
+    const fileName = studentData 
+      ? `${studentData.name}_${baseFileName}.docx`
+      : `${baseFileName}.docx`
     
     link.download = fileName
     document.body.appendChild(link)
@@ -548,7 +606,8 @@ export async function exportAssignmentToWord(
 // Export assignment to PDF
 export async function exportAssignmentToPDF(
   assignmentData: ExportAssignmentData,
-  sectionContents: Record<string, string>
+  sectionContents: Record<string, string>,
+  studentData?: { name: string; email?: string }
 ): Promise<void> {
   try {
     // Create a temporary container to render HTML content
@@ -699,9 +758,10 @@ export async function exportAssignmentToPDF(
     }
 
     // Download PDF
-    const fileName = assignmentData.metadata?.assignmentTitle 
-      ? `${assignmentData.metadata.assignmentTitle}.pdf`
-      : `${assignmentData.title}.pdf`
+    const baseFileName = assignmentData.metadata?.assignmentTitle || assignmentData.title
+    const fileName = studentData 
+      ? `${studentData.name}_${baseFileName}.pdf`
+      : `${baseFileName}.pdf`
     
     pdf.save(fileName)
   } catch (error) {

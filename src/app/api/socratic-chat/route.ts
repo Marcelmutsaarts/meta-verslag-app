@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+if (!process.env.GEMINI_API_KEY) {
+  console.error('GEMINI_API_KEY is not set in environment variables')
+}
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
 
 // Helper function to convert markdown/mixed content to readable text for context
 function contentToText(content: string): string {
@@ -67,6 +71,7 @@ export async function POST(request: NextRequest) {
       learningGoals,
       reflectionContext,
       formativeState,
+      feedbackContext,
       isQuizMode,
       quizContext
     } = body
@@ -251,7 +256,49 @@ REFLECTIES VAN STUDENT OP VOORBEELDEN:
       return context
     }
 
-    const socraticPrompt = isQuizMode ? `
+    const socraticPrompt = feedbackContext?.isFeedbackRequest ? `
+Je bent een socratische tutor die gespecialiseerd is in het geven van feedback op leerdoelen.
+
+BELANGRIJK: Geef korte, heldere en krachtige Socratische feedback die de student aanzet om het leerdoel verder aan te scherpen.
+
+LEERDOEL FEEDBACK CONTEXT:
+- Type: ${feedbackContext.type === 'whole-assignment' ? 'Leerdoel voor hele opdracht' : `Leerdoel voor sectie "${feedbackContext.sectionTitle}"`}
+- Het leerdoel van de student: "${feedbackContext.goal}"
+
+OPDRACHT CONTEXT:
+- Titel: ${assignmentContext.title}
+- Beschrijving: ${assignmentContext.description || 'Geen beschrijving'}
+${metadata?.educationLevelInfo ? `- Onderwijsniveau: ${metadata.educationLevelInfo.name} (${metadata.educationLevelInfo.ageRange})` : ''}
+${metadata?.teacherName ? `- Docent: ${metadata.teacherName}` : ''}
+
+${feedbackContext.type === 'section' && currentSection ? `
+SECTIE SPECIFIEKE CONTEXT:
+- Sectie titel: ${currentSection.title}
+- Sectie beschrijving: ${currentSection.description}
+- Hulpvragen voor deze sectie: ${currentSection.guideQuestions?.join(', ') || 'Geen hulpvragen'}
+` : ''}
+
+ALLE SECTIES OVERZICHT (voor context):
+${sectionsOverview}
+
+SOCRATISCHE FEEDBACK PRINCIPES VOOR LEERDOELEN:
+1. **Kort en krachtig**: Max 2-3 zinnen feedback
+2. **Vraaggestuurd**: Stel 1-2 concrete vragen die het leerdoel verbeteren
+3. **SMART-gericht**: Help specificiteit, meetbaarheid, haalbaarheid, relevantie
+4. **Context-bewust**: Gebruik de opdracht en sectie context
+5. **Activerend**: Zet aan tot actie en verbetering
+
+FEEDBACK STRATEGIEËN:
+- Als het leerdoel te vaag is: Vraag naar meer specificiteit
+- Als het leerdoel te breed is: Help het smaller te maken
+- Als het leerdoel niet meetbaar is: Vraag hoe ze succes zullen herkennen
+- Als het leerdoel niet relevant lijkt: Vraag naar de connectie met de opdracht
+- Als het leerdoel te simpel is: Daag uit tot dieper leren
+
+Student vraag/opmerking: "${message}"
+
+Geef nu korte, krachtige Socratische feedback die het leerdoel verbetert. Geen lange uitleg - gewoon effectieve vragen die tot actie aanzetten.
+` : isQuizMode ? `
 Je bent een diagnostische quiz begeleider die studenten helpt reflecteren op hun geschreven werk door middel van formatieve feedback.
 
 QUIZ CONTEXT:
@@ -281,7 +328,7 @@ ${getFormativeAssessmentContext()}
 ${getLearningGoalContext()}
 
 STUDENT TEKST CONTEXT:
-- Huidige sectie: ${currentSection?.title || 'Onbekend'}
+- Huidige sectie: ${currentSection && currentSection.title ? currentSection.title : 'Onbekend'}
 - Geschreven tekst: "${readableContent || 'Nog geen tekst geschreven'}"
 
 Student antwoord/vraag: "${message}"
@@ -426,8 +473,13 @@ Voorbeelden van diagnostische quiz vragen (JE BENT IN QUIZ-MODUS):
     return NextResponse.json({ response })
   } catch (error) {
     console.error('Socratic chat error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return NextResponse.json(
-      { error: 'Er ging iets mis met de chat' },
+      { 
+        error: 'Er ging iets mis met de chat',
+        details: errorMessage,
+        type: error instanceof Error ? error.constructor.name : 'Unknown'
+      },
       { status: 500 }
     )
   }
