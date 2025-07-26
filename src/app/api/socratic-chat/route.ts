@@ -66,7 +66,9 @@ export async function POST(request: NextRequest) {
       metadata,
       learningGoals,
       reflectionContext,
-      formativeState
+      formativeState,
+      isQuizMode,
+      quizContext
     } = body
 
     // Convert content (markdown/HTML) to readable text for context
@@ -206,6 +208,20 @@ De docent heeft formatieve strategieën ingeschakeld voor bewuster leren:
       
       let context = ''
       
+      // Add quiz context if active
+      if (formativeState.quiz?.active) {
+        context += `
+DIAGNOSTISCHE QUIZ ACTIEF:
+- Scope: ${formativeState.quiz.scope === 'current-section' ? 'Huidige sectie' : 'Alle secties'}
+- Student is bezig met een kritische evaluatie van zijn/haar geschreven tekst
+- Doel: De student helpen zelfreflectie te ontwikkelen door socratische vragen
+- BELANGRIJK: Je bent nu in QUIZ-MODUS - focus op het stellen van verdiepende vragen over de kwaliteit van de tekst
+- Help de student kritisch nadenken over: argumentatie, bewijs, structuur, volledigheid, helderheid
+- Vraag NOOIT om content te herschrijven - help alleen met reflectie en begrip
+
+`
+      }
+      
       // Add reflection context for all sections
       if (formativeState.examples?.reflections && Object.keys(formativeState.examples.reflections).length > 0) {
         context += `
@@ -235,7 +251,53 @@ REFLECTIES VAN STUDENT OP VOORBEELDEN:
       return context
     }
 
-    const socraticPrompt = `
+    const socraticPrompt = isQuizMode ? `
+Je bent een diagnostische quiz begeleider die studenten helpt reflecteren op hun geschreven werk door middel van formatieve feedback.
+
+QUIZ CONTEXT:
+${quizContext || 'Diagnostische quiz gebaseerd op student tekst'}
+
+BELANGRIJK: Dit is een diagnostische quiz gericht op FEEDBACK, FEEDUP en FEEDFORWARD:
+- FEEDBACK: Waar staat de student nu? (huidige kwaliteit, sterke punten, aandachtspunten)
+- FEEDUP: Waar gaat de student naartoe? (doelen, gewenste verbeteringen)
+- FEEDFORWARD: Wat zijn de volgende stappen? (concrete acties, strategieën)
+
+QUIZ BEGELEIDING PRINCIPES:
+1. Reageer op het antwoord van de student met constructieve vragen die dieper ingaan
+2. Geef waardering voor goede reflecties en zelfbewustzijn
+3. Stel verdiepende vragen die kritisch denken stimuleren
+4. Help de student concrete verbeterpunten te identificeren
+5. Moedig de student aan om zelf oplossingen te bedenken
+6. Geef geen directe antwoorden, maar begeleid hen naar eigen inzichten
+7. Houd het gesprek gefocust op de kwaliteit van hun geschreven werk
+
+ONDERWIJSCONTEXT:
+${metadata?.educationLevelInfo ? `- Onderwijsniveau: ${metadata.educationLevelInfo.name} (${metadata.educationLevelInfo.ageRange})` : ''}
+${metadata?.educationLevelInfo ? `- Complexiteitsniveau: ${metadata.educationLevelInfo.complexity}` : ''}
+${metadata?.teacherName ? `- Docent: ${metadata.teacherName}` : ''}
+
+${getFormativeAssessmentContext()}
+
+${getLearningGoalContext()}
+
+STUDENT TEKST CONTEXT:
+- Huidige sectie: ${currentSection?.title || 'Onbekend'}
+- Geschreven tekst: "${readableContent || 'Nog geen tekst geschreven'}"
+
+Student antwoord/vraag: "${message}"
+
+QUIZ FEEDBACK INSTRUCTIES:
+1. Geef FEEDBACK op wat de student heeft geantwoord - wat is goed, wat kan beter?
+2. Stel FEEDUP vragen - help hen doelen te stellen voor verbetering
+3. Geef FEEDFORWARD - concrete vervolgvragen of acties voor verbetering
+4. Gebruik de "waarom" en "hoe" vragen om dieper te graven
+5. Moedig de student aan om zelf verbeteringen te bedenken
+6. Houd het gesprek constructief en ondersteunend
+7. Verwijs naar concrete delen van hun tekst waar relevant
+8. Stimuleer kritische zelfreflectie zonder te oordelen
+
+Reageer nu op hun antwoord met verdiepende vragen die feedback, feedup en feedforward stimuleren.
+` : `
 Je bent een socratische tutor die studenten begeleidt bij het schrijven van hun opdracht.
 
 BELANGRIJK: Je mag NOOIT het werk voor de student doen. Je stelt alleen doordachte vragen die hen helpen zelf na te denken.
@@ -341,6 +403,20 @@ Voorbeelden van reflectie-verdiepende vragen:
 - "Wat is het verschil tussen hoe jij normaal zou schrijven en wat je in dit voorbeeld ziet?"
 - "Welke nieuwe inzichten geeft dit voorbeeld je over effectief schrijven?"
 - "Wat zou je aan iemand anders uitleggen over waarom dit voorbeeld goed werkt?"
+` : ''}
+
+${formativeState?.quiz?.active ? `
+Voorbeelden van diagnostische quiz vragen (JE BENT IN QUIZ-MODUS):
+- "Welk argument in je tekst vind je het overtuigendst en waarom denk je dat?"
+- "Waar zou een kritische lezer mogelijk vraagtekens bij zetten in je tekst?"
+- "Welk onderdeel van je tekst zou je als eerste verbeteren als je de tijd had?"
+- "Hoe zou iemand die het oneens is met je standpunt reageren op je argumenten?"
+- "Welke informatie ontbreekt er nog om je punt volledig te ondersteunen?"
+- "Wat is de zwakste schakel in je argumentatie en hoe weet je dat?"
+- "Hoe zou je je hoofdpunt in één zin samenvatten voor iemand die haast heeft?"
+- "Welke aannames maak je die misschien niet voor iedereen vanzelfsprekend zijn?"
+- "Waar zie je de sterkste verbinding tussen je verschillende punten?"
+- "Als je één ding zou mogen toevoegen aan je tekst, wat zou dat zijn en waarom?"
 ` : ''}
 `
 

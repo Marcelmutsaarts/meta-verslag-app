@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
     const formativeAssessmentData = formData.get('formativeAssessment') as string
     const exampleFileCount = parseInt(formData.get('exampleFileCount') as string) || 0
 
-    if (fileCount === 0) {
-      return NextResponse.json({ error: 'Geen bestanden geüpload' }, { status: 400 })
+    if (fileCount === 0 && !instructions?.trim()) {
+      return NextResponse.json({ error: 'Geen bestanden geüpload en geen toelichting gegeven' }, { status: 400 })
     }
 
     // Extract text from all documents
@@ -48,21 +48,105 @@ export async function POST(request: NextRequest) {
       if (file.type === 'application/pdf') {
         try {
           const pdfParse = (await import('pdf-parse')).default
+          
+          // Enhanced PDF parsing
           const pdfData = await pdfParse(buffer)
+          
           documentText = pdfData.text
+          
+          // Additional validation for PDF content
+          if (!documentText || documentText.trim().length < 10) {
+            console.warn(`PDF ${file.name} appears to have minimal text content. Trying alternative extraction...`)
+            
+            // Fallback: try without options
+            const fallbackPdfData = await pdfParse(buffer)
+            documentText = fallbackPdfData.text || ''
+          }
+          
         } catch (pdfError) {
           console.error('PDF parsing error:', pdfError)
-          return NextResponse.json({ error: `Fout bij het lezen van PDF bestand: ${file.name}` }, { status: 400 })
+          console.error('PDF error details:', {
+            message: pdfError instanceof Error ? pdfError.message : 'Unknown error',
+            stack: pdfError instanceof Error ? pdfError.stack : 'No stack trace',
+            fileName: file.name,
+            fileSize: file.size
+          })
+          return NextResponse.json({ 
+            error: `Fout bij het lezen van PDF bestand: ${file.name}`,
+            details: `Het PDF bestand kan mogelijk beschadigd zijn of een ongewoon formaat hebben. Details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende fout'}`
+          }, { status: 400 })
         }
       } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        const result = await mammoth.extractRawText({ buffer })
-        documentText = result.value
-      } else {
-        // Fallback: try to read as text if no specific type matches
+        try {
+          // Enhanced Word parsing
+          const result = await mammoth.extractRawText({buffer})
+          
+          documentText = result.value
+          
+          // Log any warnings from mammoth
+          if (result.messages && result.messages.length > 0) {
+            console.log(`Mammoth warnings for ${file.name}:`, result.messages)
+          }
+          
+          // Additional validation for Word content
+          if (!documentText || documentText.trim().length < 10) {
+            console.warn(`Word document ${file.name} appears to have minimal text content.`)
+            
+            // Try alternative extraction method
+            try {
+              const altResult = await mammoth.extractRawText({ buffer })
+              documentText = altResult.value || ''
+            } catch (altError) {
+              console.error('Alternative Word extraction failed:', altError)
+            }
+          }
+          
+        } catch (wordError) {
+          console.error('Word parsing error:', wordError)
+          console.error('Word error details:', {
+            message: wordError instanceof Error ? wordError.message : 'Unknown error',
+            stack: wordError instanceof Error ? wordError.stack : 'No stack trace',
+            fileName: file.name,
+            fileSize: file.size
+          })
+          return NextResponse.json({ 
+            error: `Fout bij het lezen van Word bestand: ${file.name}`,
+            details: `Het Word bestand kan mogelijk beschadigd zijn of een ongewoon formaat hebben. Details: ${wordError instanceof Error ? wordError.message : 'Onbekende fout'}`
+          }, { status: 400 })
+        }
+      } else if (file.type === 'text/plain') {
+        // Improved text file handling
         try {
           documentText = buffer.toString('utf-8')
-        } catch {
-          return NextResponse.json({ error: `Onbekend bestandsformaat voor ${file.name}. Gebruik PDF, DOCX of TXT.` }, { status: 400 })
+          
+          // Try alternative encodings if UTF-8 fails
+          if (!documentText || documentText.includes('�')) {
+            console.log(`Trying alternative encoding for ${file.name}`)
+            documentText = buffer.toString('latin1') || buffer.toString('ascii')
+          }
+        } catch (textError) {
+          console.error('Text file parsing error:', textError)
+          return NextResponse.json({ 
+            error: `Fout bij het lezen van tekst bestand: ${file.name}`,
+            details: 'Het bestand kan mogelijk een onondersteunde encoding hebben.'
+          }, { status: 400 })
+        }
+      } else {
+        // Improved fallback with better error messages
+        console.warn(`Unknown file type ${file.type} for ${file.name}, attempting text extraction`)
+        try {
+          documentText = buffer.toString('utf-8')
+          
+          // Validate that we got readable text
+          if (!documentText || documentText.length < 10 || documentText.includes('�')) {
+            throw new Error('Content appears to be binary or corrupted')
+          }
+        } catch (fallbackError) {
+          console.error('Fallback text extraction failed:', fallbackError)
+          return NextResponse.json({ 
+            error: `Onbekend of onondersteund bestandsformaat voor ${file.name}`,
+            details: 'Ondersteunde formaten: PDF (.pdf), Word (.docx), en Tekst (.txt). Controleer of het bestand niet beschadigd is.'
+          }, { status: 400 })
         }
       }
 
@@ -79,8 +163,8 @@ export async function POST(request: NextRequest) {
       totalTextLength += documentText.length
     }
 
-    if (documents.length === 0) {
-      return NextResponse.json({ error: 'Geen bruikbare tekstinhoud gevonden in de geüploade bestanden' }, { status: 400 })
+    if (documents.length === 0 && !instructions?.trim()) {
+      return NextResponse.json({ error: 'Geen bruikbare tekstinhoud gevonden in de geüploade bestanden en geen toelichting gegeven' }, { status: 400 })
     }
 
     console.log(`Processed ${documents.length} documents with total text length: ${totalTextLength}`)
@@ -163,10 +247,15 @@ export async function POST(request: NextRequest) {
     const levelInfo = levelMap[educationLevel] || levelMap['HAVO']
 
     // Create combined document content for analysis
-    const combinedContent = documents.map(doc => `
+    const combinedContent = documents.length > 0 
+      ? documents.map(doc => `
 === DOCUMENT: ${doc.name} ===
 ${doc.content}
 `).join('\n\n')
+      : `
+=== ALLEEN TOELICHTING MODUS ===
+Geen documenten geüpload. Gebruik alleen de toelichting om de opdracht te begrijpen.
+`
 
     // Helper function to generate formative assessment prompt section
     const getFormativeAssessmentPrompt = () => {
@@ -238,6 +327,7 @@ CONTEXT:
 ${teacherName ? `- Docent: ${teacherName}` : ''}
 ${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
 - Aantal documenten: ${documents.length}
+${documents.length === 0 ? `\n⚠️  ALLEEN TOELICHTING MODUS: Er zijn geen documenten geüpload. Baseer de opdracht VOLLEDIG op de toelichting van de docent.` : ''}
 
 Document inhoud (eerste 3000 karakters):
 ${combinedContent.substring(0, 3000)}${combinedContent.length > 3000 ? '...' : ''}
@@ -280,6 +370,8 @@ CONTEXT:
 - Complexiteitsniveau: ${levelInfo.complexity}
 ${teacherName ? `- Docent: ${teacherName}` : ''}
 ${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
+- Aantal documenten: ${documents.length}
+${documents.length === 0 ? `\n⚠️  ALLEEN TOELICHTING MODUS: Er zijn geen documenten geüpload. Baseer de opdracht VOLLEDIG op de toelichting van de docent.` : ''}
 
 Document inhoud:
 ${combinedContent}
@@ -323,6 +415,7 @@ CONTEXT:
 ${teacherName ? `- Docent: ${teacherName}` : ''}
 ${assignmentTitle ? `- Opdrachttitel: ${assignmentTitle}` : ''}
 - Aantal documenten: ${documents.length}
+${documents.length === 0 ? `\n⚠️  ALLEEN TOELICHTING MODUS: Er zijn geen documenten geüpload. Baseer de opdracht VOLLEDIG op de toelichting van de docent.` : ''}
 
 Document inhoud:
 ${combinedContent}

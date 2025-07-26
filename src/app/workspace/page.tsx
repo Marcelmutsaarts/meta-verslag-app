@@ -31,6 +31,11 @@ interface FormativeAssessment {
       exampleFiles: File[]
       customReflectionQuestions: string
     }
+    diagnosticQuiz: {
+      enabled: boolean
+      scope: 'per-section' | 'whole-report'
+      customPrompt: string
+    }
   }
 }
 
@@ -91,11 +96,20 @@ export default function WorkspacePage() {
       loading: {} as Record<string, boolean>,
       reflections: {} as Record<string, string>
     },
+    quiz: {
+      active: false,
+      scope: 'current-section' as 'current-section' | 'all-sections',
+      targetSections: [] as string[],
+      chatMessages: [] as Array<{role: string, content: string}>,
+      chatInput: '',
+      isLoading: false
+    },
     dialogs: {
       feedbackDialog: { open: false, goalKey: '' },
       reflectionDialog: { open: false, sectionId: '' },
       exampleScope: { open: false, scope: 'current-section' as 'current-section' | 'all-sections' },
-      exampleContext: { open: false, scope: 'current-section' as 'current-section' | 'all-sections', context: '' }
+      exampleContext: { open: false, scope: 'current-section' as 'current-section' | 'all-sections', context: '' },
+      quizDialog: { open: false, scope: 'current-section' as 'current-section' | 'all-sections' }
     }
   })
 
@@ -105,6 +119,114 @@ export default function WorkspacePage() {
   const [exampleScope, setExampleScope] = useState<'current-section' | 'all-sections'>('current-section')
   
   const router = useRouter()
+
+  // Quiz handler function
+  const handleStartQuiz = async (scope: 'current-section' | 'all-sections') => {
+    if (!assignmentData) return
+
+    // Prepare sections to include in quiz
+    let targetSections: Section[] = []
+    let hasContent = false
+
+    if (scope === 'current-section') {
+      const currentSection = assignmentData.sections.find(s => s.id === selectedSection)
+      if (currentSection && sectionContents[selectedSection]?.trim()) {
+        targetSections = [currentSection]
+        hasContent = true
+      }
+    } else {
+      targetSections = assignmentData.sections.filter(section => 
+        sectionContents[section.id]?.trim()
+      )
+      hasContent = targetSections.length > 0
+    }
+
+    if (!hasContent) {
+      alert('Er is geen tekst geschreven om te analyseren.')
+      return
+    }
+
+    // Set loading state and open dialog
+    setFormativeState(prev => ({
+      ...prev,
+      quiz: {
+        ...prev.quiz,
+        active: true,
+        scope,
+        targetSections: targetSections.map(s => s.id),
+        isLoading: true,
+        chatMessages: [],
+        chatInput: ''
+      },
+      dialogs: {
+        ...prev.dialogs,
+        quizDialog: { open: true, scope }
+      }
+    }))
+
+    // Start the quiz via API
+    try {
+      const response = await fetch('/api/generate-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope,
+          targetSections: targetSections.map(section => ({
+            id: section.id,
+            title: section.title,
+            description: section.description,
+            guideQuestions: section.guideQuestions,
+            content: sectionContents[section.id] || ''
+          })),
+          assignmentContext: {
+            title: assignmentData.title,
+            objective: assignmentData.objective,
+            generalGuidance: assignmentData.generalGuidance,
+            sections: assignmentData.sections
+          },
+          metadata: assignmentData.metadata,
+          formativeState: {
+            learningGoals: formativeState.learningGoals,
+            examples: {
+              reflections: formativeState.examples.reflections,
+              availableExamples: Object.keys(formativeState.examples.content)
+            }
+          }
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        
+        setFormativeState(prev => ({
+          ...prev,
+          quiz: {
+            ...prev.quiz,
+            isLoading: false,
+            chatMessages: [{ role: 'assistant', content: data.initialQuestions }]
+          }
+        }))
+      } else {
+        throw new Error('Quiz generatie mislukt')
+      }
+    } catch (error) {
+      console.error('Quiz error:', error)
+      alert('Er ging iets mis bij het starten van de quiz')
+      
+      setFormativeState(prev => ({
+        ...prev,
+        quiz: {
+          ...prev.quiz,
+          active: false,
+          isLoading: false
+        },
+        dialogs: {
+          ...prev.dialogs,
+          quizDialog: { open: false, scope: 'current-section' }
+        }
+      }))
+    }
+  }
 
   // Toggle collapsible sections
   const toggleSidebarSection = (section: keyof typeof collapsedSections) => {
@@ -194,7 +316,16 @@ export default function WorkspacePage() {
           feedbackDialog: { open: false, goalKey: '' },
           reflectionDialog: { open: false, sectionId: '' },
           exampleScope: { open: false, scope: 'current-section' as 'current-section' | 'all-sections' },
-          exampleContext: { open: false, scope: 'current-section' as 'current-section' | 'all-sections', context: '' }
+          exampleContext: { open: false, scope: 'current-section' as 'current-section' | 'all-sections', context: '' },
+          quizDialog: { open: false, scope: 'current-section' as 'current-section' | 'all-sections' }
+        },
+        quiz: {
+          active: false,
+          questions: [],
+          answers: {},
+          isLoading: false,
+          chatMessages: [],
+          chatInput: ''
         }
       }
 
@@ -969,6 +1100,43 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
       {/* Middle - Content Area */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-4xl mx-auto p-8">
+          {/* Quiz Section - Always visible when quiz is enabled */}
+          {assignmentData?.metadata?.formativeAssessment?.strategies?.diagnosticQuiz?.enabled && (
+            <div className="mb-8 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-purple-800 flex items-center mb-2">
+                    <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                      <path fillRule="evenodd" d="M4 5a2 2 0 012-2 1 1 0 000 2H4v10a2 2 0 002 2h8a2 2 0 002-2V5h-2a1 1 0 100-2 2 2 0 012 2v10a4 4 0 01-4 4H6a4 4 0 01-4-4V5z" clipRule="evenodd" />
+                    </svg>
+                    Diagnostische Quiz - Hele Opdracht
+                  </h2>
+                  <p className="text-sm text-purple-600">Test je begrip van de complete opdracht met een quiz</p>
+                </div>
+                <button
+                    onClick={() => handleStartQuiz('all-sections')}
+                    disabled={formativeState.quiz.isLoading}
+                    className="px-4 py-2 bg-pink-600 text-white text-sm rounded-lg hover:bg-pink-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                  >
+                    {formativeState.quiz.isLoading ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Quiz laden...
+                      </>
+                    ) : (
+                      <>
+                        📚 Start Quiz
+                      </>
+                    )}
+                  </button>
+              </div>
+            </div>
+          )}
+
           {/* Whole Assignment Learning Goal (appears above all sections) */}
           {assignmentData?.metadata?.formativeAssessment?.strategies?.personalLearningGoals?.enabled && 
            assignmentData.metadata.formativeAssessment.strategies.personalLearningGoals.scope === 'whole-report' && (
@@ -980,27 +1148,51 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
                   </svg>
                   Leerdoel voor Hele Opdracht
                 </h2>
-                {assignmentData.metadata?.formativeAssessment?.strategies?.exampleBasedLearning?.enabled && (
-                  <button
-                    onClick={() => handleGenerateExample('all-sections')}
-                    disabled={formativeState.examples.loading['whole-assignment']}
-                    className="px-4 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
-                  >
-                    {formativeState.examples.loading['whole-assignment'] ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Genereren...
-                      </>
-                    ) : (
-                      <>
-                        📝 Voorbeeld Hele Verslag
-                      </>
-                    )}
-                  </button>
-                )}
+                <div className="flex space-x-2">
+                  {assignmentData.metadata?.formativeAssessment?.strategies?.exampleBasedLearning?.enabled && (
+                    <button
+                      onClick={() => handleGenerateExample('all-sections')}
+                      disabled={formativeState.examples.loading['whole-assignment']}
+                      className="px-4 py-2 bg-orange-600 text-white text-sm rounded-lg hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                    >
+                      {formativeState.examples.loading['whole-assignment'] ? (
+                        <>
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Genereren...
+                        </>
+                      ) : (
+                        <>
+                          📝 Voorbeeld Hele Verslag
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {assignmentData.metadata?.formativeAssessment?.strategies?.diagnosticQuiz?.enabled &&
+                   assignmentData.metadata.formativeAssessment.strategies.diagnosticQuiz.scope === 'whole-report' && (
+                    <button
+                      onClick={() => handleStartQuiz('all-sections')}
+                      disabled={formativeState.quiz.isLoading}
+                      className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                    >
+                      {formativeState.quiz.isLoading ? (
+                        <>
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Quiz starten...
+                        </>
+                      ) : (
+                        <>
+                          🧠 Quiz Hele Verslag
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
               
               {formativeState.learningGoals.status['whole-assignment'] === 'final' ? (
@@ -1169,25 +1361,46 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
                       </svg>
                       Leerdoel voor deze Sectie
                     </h3>
-                    {assignmentData.metadata?.formativeAssessment?.strategies?.exampleBasedLearning?.enabled && (
-                      <button
-                        onClick={() => handleGenerateExample('current-section')}
-                        disabled={formativeState.examples.loading[selectedSection]}
-                        className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
-                      >
-                        {formativeState.examples.loading[selectedSection] ? (
-                          <>
-                            <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            Genereren...
-                          </>
-                        ) : (
-                          '📝 Voorbeeld'
-                        )}
-                      </button>
-                    )}
+                    <div className="flex space-x-2">
+                      {assignmentData.metadata?.formativeAssessment?.strategies?.exampleBasedLearning?.enabled && (
+                        <button
+                          onClick={() => handleGenerateExample('current-section')}
+                          disabled={formativeState.examples.loading[selectedSection]}
+                          className="px-3 py-1 bg-orange-600 text-white text-sm rounded hover:bg-orange-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                        >
+                          {formativeState.examples.loading[selectedSection] ? (
+                            <>
+                              <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Genereren...
+                            </>
+                          ) : (
+                            '📝 Voorbeeld'
+                          )}
+                        </button>
+                      )}
+                      {assignmentData.metadata?.formativeAssessment?.strategies?.diagnosticQuiz?.enabled && (
+                        <button
+                          onClick={() => handleStartQuiz('current-section')}
+                          disabled={formativeState.quiz.isLoading}
+                          className="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                        >
+                          {formativeState.quiz.isLoading ? (
+                            <>
+                              <svg className="animate-spin -ml-1 mr-1 h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Quiz...
+                            </>
+                          ) : (
+                            '🧠 Quiz'
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   
                   {formativeState.learningGoals.status[selectedSection] === 'final' ? (
@@ -1325,6 +1538,48 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
                 </ul>
               </div>
 
+              {/* Quiz button for current section if quiz is enabled */}
+              {assignmentData?.metadata?.formativeAssessment?.strategies?.diagnosticQuiz?.enabled && (
+                <div className="mb-4 bg-purple-50 border border-purple-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-purple-800 flex items-center">
+                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+                          <path fillRule="evenodd" d="M4 5a2 2 0 012-2 1 1 0 000 2H4v10a2 2 0 002 2h8a2 2 0 002-2V5h-2a1 1 0 100-2 2 2 0 012 2v10a4 4 0 01-4 4H6a4 4 0 01-4-4V5z" clipRule="evenodd" />
+                        </svg>
+                        Quiz voor deze sectie
+                      </h3>
+                      <p className="text-sm text-purple-600 mt-1">Test je begrip van deze sectie</p>
+                    </div>
+                    <button
+                      onClick={() => handleStartQuiz('current-section')}
+                      disabled={formativeState.quiz.isLoading || !sectionContents[selectedSection]?.trim()}
+                      className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
+                    >
+                      {formativeState.quiz.isLoading ? (
+                        <>
+                          <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Quiz laden...
+                        </>
+                      ) : (
+                        <>
+                          📊 Start Quiz
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  {!sectionContents[selectedSection]?.trim() && (
+                    <p className="text-sm text-purple-600 mt-2 italic">
+                      💡 Schrijf eerst tekst voor deze sectie voordat je de quiz kunt starten
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="bg-white rounded-lg shadow-sm border border-gray-200">
                 <div className="p-4 border-b border-gray-200">
                   <h3 className="font-semibold text-gray-800">Jouw tekst</h3>
@@ -1449,7 +1704,7 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
       )}
       
       {/* Learning Goal Feedback Dialog */}
-      {formativeState.dialogs.feedbackDialog.open && (
+      {formativeState.dialogs?.feedbackDialog?.open && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
@@ -1534,7 +1789,7 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
       )}
 
       {/* Reflection Dialog */}
-      {formativeState.dialogs.reflectionDialog.open && (
+      {formativeState.dialogs?.reflectionDialog?.open && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between mb-4">
@@ -1727,7 +1982,7 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
       )}
 
       {/* Example Context Dialog */}
-      {formativeState.dialogs.exampleContext.open && (
+      {formativeState.dialogs?.exampleContext?.open && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
             <div className="flex items-center justify-between mb-4">
@@ -1873,6 +2128,247 @@ Kun je me kritische feedback geven op dit leerdoel? Help me het te verbeteren do
               >
                 Voorbeeld Bekijken
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Quiz Dialog */}
+      {formativeState.dialogs?.quizDialog?.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                    <svg className="w-6 h-6 mr-2 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" clipRule="evenodd" />
+                    </svg>
+                    Diagnostische Quiz
+                  </h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {formativeState.quiz.scope === 'current-section' 
+                      ? `Kritische vragen over "${assignmentData?.sections.find(s => s.id === selectedSection)?.title}"`
+                      : 'Kritische vragen over je volledige tekst'
+                    }
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormativeState(prev => ({
+                    ...prev,
+                    quiz: { ...prev.quiz, active: false },
+                    dialogs: { ...prev.dialogs, quizDialog: { open: false, scope: 'current-section' } }
+                  }))}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-hidden flex">
+              {/* Left side - Quiz Chat */}
+              <div className="flex-1 flex flex-col">
+                {/* Chat Messages */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {formativeState.quiz.isLoading ? (
+                    <div className="text-center py-8">
+                      <div className="inline-flex items-center px-4 py-2 bg-purple-50 text-purple-700 rounded-lg">
+                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 818-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 714 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Quiz wordt gegenereerd...
+                      </div>
+                    </div>
+                  ) : formativeState.quiz.chatMessages.length === 0 ? (
+                    <div className="text-center text-gray-500 py-8">
+                      <p>Er ging iets mis bij het laden van de quiz.</p>
+                    </div>
+                  ) : (
+                    formativeState.quiz.chatMessages.map((msg, idx) => (
+                      <div key={idx} className={`${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                        <div className={`inline-block max-w-[80%] p-4 rounded-lg ${
+                          msg.role === 'user'
+                            ? 'bg-purple-600 text-white'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  
+                  {formativeState.quiz.isLoading && formativeState.quiz.chatMessages.length > 0 && (
+                    <div className="text-left">
+                      <div className="inline-block bg-gray-100 p-4 rounded-lg">
+                        <div className="flex space-x-2">
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-6 border-t border-gray-200">
+                  <form 
+                    onSubmit={async (e) => {
+                      e.preventDefault()
+                      if (!formativeState.quiz.chatInput.trim() || formativeState.quiz.isLoading) return
+
+                      const userMessage = formativeState.quiz.chatInput
+                      
+                      // Add user message immediately
+                      setFormativeState(prev => ({
+                        ...prev,
+                        quiz: {
+                          ...prev.quiz,
+                          chatMessages: [...prev.quiz.chatMessages, { role: 'user', content: userMessage }],
+                          chatInput: '',
+                          isLoading: true
+                        }
+                      }))
+
+                      // Send to quiz endpoint for continuation
+                      try {
+                        const response = await fetch('/api/socratic-chat', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            message: userMessage,
+                            currentSection: assignmentData?.sections.find(s => s.id === selectedSection),
+                            currentContent: sectionContents[selectedSection] || '',
+                            sectionProgress: assignmentData?.sections.map(section => ({
+                              ...section,
+                              content: sectionContents[section.id] || '',
+                              hasContent: Boolean(sectionContents[section.id]?.trim()),
+                              isCurrentSection: section.id === selectedSection
+                            })),
+                            assignmentContext: {
+                              title: assignmentData?.title,
+                              objective: assignmentData?.objective,
+                              generalGuidance: assignmentData?.generalGuidance,
+                              sections: assignmentData?.sections
+                            },
+                            metadata: assignmentData?.metadata,
+                            learningGoals: formativeState.learningGoals.final,
+                            formativeState: {
+                              learningGoals: formativeState.learningGoals,
+                              examples: {
+                                reflections: formativeState.examples.reflections,
+                                availableExamples: Object.keys(formativeState.examples.content)
+                              },
+                              quiz: {
+                                active: true,
+                                scope: formativeState.quiz.scope,
+                                targetSections: formativeState.quiz.targetSections
+                              }
+                            },
+                            isQuizMode: true,
+                            quizContext: formativeState.quiz.questions[0] || 'Diagnostische quiz gebaseerd op geschreven tekst'
+                          })
+                        })
+
+                        if (response.ok) {
+                          const data = await response.json()
+                          setFormativeState(prev => ({
+                            ...prev,
+                            quiz: {
+                              ...prev.quiz,
+                              chatMessages: [...prev.quiz.chatMessages, { role: 'assistant', content: data.response }],
+                              isLoading: false
+                            }
+                          }))
+                        } else {
+                          throw new Error('Quiz chat failed')
+                        }
+                      } catch (error) {
+                        console.error('Quiz chat error:', error)
+                        setFormativeState(prev => ({
+                          ...prev,
+                          quiz: {
+                            ...prev.quiz,
+                            isLoading: false
+                          }
+                        }))
+                      }
+                    }}
+                    className="flex space-x-3"
+                  >
+                    <input
+                      type="text"
+                      value={formativeState.quiz.chatInput}
+                      onChange={(e) => setFormativeState(prev => ({
+                        ...prev,
+                        quiz: { ...prev.quiz, chatInput: e.target.value }
+                      }))}
+                      placeholder="Beantwoord de vragen of stel een vraag..."
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      disabled={formativeState.quiz.isLoading}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!formativeState.quiz.chatInput.trim() || formativeState.quiz.isLoading}
+                      className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 transition-colors"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </button>
+                  </form>
+                  
+                  <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                    <p className="text-sm text-purple-700">
+                      💡 <strong>Tip:</strong> Deze quiz helpt je kritisch naar je eigen tekst te kijken. Neem de tijd om eerlijk te antwoorden op de vragen.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right side - Section content (readonly) */}
+              <div className="w-96 bg-gray-50 border-l border-gray-200 flex flex-col">
+                <div className="p-4 border-b border-gray-200">
+                  <h3 className="font-medium text-gray-800">Je geschreven tekst</h3>
+                  <p className="text-sm text-gray-600">
+                    {formativeState.quiz.scope === 'current-section' 
+                      ? 'Huidige sectie' 
+                      : 'Alle secties met tekst'
+                    }
+                  </p>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {formativeState.quiz.scope === 'current-section' ? (
+                    <div className="bg-white p-4 rounded border">
+                      <h4 className="font-medium text-gray-800 mb-2">
+                        {assignmentData?.sections.find(s => s.id === selectedSection)?.title}
+                      </h4>
+                      <div className="text-sm text-gray-600 max-h-64 overflow-y-auto">
+                        <div dangerouslySetInnerHTML={{ __html: sectionContents[selectedSection] || '' }} />
+                      </div>
+                    </div>
+                  ) : (
+                    formativeState.quiz.targetSections.map(sectionId => {
+                      const section = assignmentData?.sections.find(s => s.id === sectionId)
+                      return (
+                        <div key={sectionId} className="bg-white p-4 rounded border">
+                          <h4 className="font-medium text-gray-800 mb-2">{section?.title}</h4>
+                          <div className="text-sm text-gray-600 max-h-32 overflow-y-auto">
+                            <div dangerouslySetInnerHTML={{ __html: sectionContents[sectionId] || '' }} />
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

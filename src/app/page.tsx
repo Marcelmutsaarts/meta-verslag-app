@@ -34,6 +34,11 @@ interface FormativeAssessment {
       exampleFiles: File[]
       customReflectionQuestions: string
     }
+    diagnosticQuiz: {
+      enabled: boolean
+      scope: 'per-section' | 'whole-report'
+      customPrompt: string
+    }
   }
 }
 
@@ -60,6 +65,11 @@ export default function Home() {
         exampleSource: 'ai-generated',
         exampleFiles: [],
         customReflectionQuestions: ''
+      },
+      diagnosticQuiz: {
+        enabled: false,
+        scope: 'per-section',
+        customPrompt: ''
       }
     }
   })
@@ -102,9 +112,18 @@ export default function Home() {
     const selectedFiles = Array.from(e.target.files)
     const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']
     
+    // Enhanced validation
     for (const selectedFile of selectedFiles) {
+      // Check file type
       if (!validTypes.includes(selectedFile.type)) {
         alert(`Bestand ${selectedFile.name}: Alleen PDF, DOCX en TXT bestanden zijn toegestaan`)
+        continue
+      }
+      
+      // Check file size (max 10MB)
+      const maxSize = 10 * 1024 * 1024 // 10MB in bytes
+      if (selectedFile.size > maxSize) {
+        alert(`Bestand ${selectedFile.name}: Bestand is te groot (max 10MB)`)
         continue
       }
       
@@ -115,8 +134,15 @@ export default function Home() {
       }
       
       try {
+        console.log(`Processing file: ${selectedFile.name} (${selectedFile.type}, ${(selectedFile.size / 1024).toFixed(1)} KB)`)
+        
         const content = await extractTextFromFile(selectedFile)
         const tokens = estimateTokens(content)
+        
+        // Validate that we got some content for non-text files
+        if (selectedFile.type !== 'text/plain' && content.length < 100) {
+          console.warn(`File ${selectedFile.name} produced minimal content, but adding anyway`)
+        }
         
         const newFile: FileWithContent = {
           file: selectedFile,
@@ -125,9 +151,12 @@ export default function Home() {
         }
         
         setFiles(prev => [...prev, newFile])
+        console.log(`Successfully added file: ${selectedFile.name} (${tokens} tokens)`)
+        
       } catch (error) {
         console.error('Error reading file:', error)
-        alert(`Fout bij het lezen van ${selectedFile.name}`)
+        const errorMessage = error instanceof Error ? error.message : 'Onbekende fout'
+        alert(`Fout bij het lezen van ${selectedFile.name}: ${errorMessage}\\n\\nTips:\\n- Controleer of het bestand niet beschadigd is\\n- Probeer het bestand opnieuw op te slaan\\n- Voor PDF: probeer een andere PDF viewer/generator`)
       }
     }
     
@@ -141,8 +170,8 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent, mode: 'preview' | 'final' = 'final') => {
     e.preventDefault()
-    if (files.length === 0) {
-      alert('Upload eerst minimaal één opdracht document')
+    if (files.length === 0 && !additionalInstructions.trim()) {
+      alert('Upload minimaal één opdracht document OF voeg toelichting toe')
       return
     }
 
@@ -412,7 +441,8 @@ export default function Home() {
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-sm font-medium text-gray-700">
-                    Upload opdracht documenten *
+                    Upload opdracht documenten {!additionalInstructions.trim() && <span className="text-red-500">*</span>}
+                    {additionalInstructions.trim() && <span className="text-green-600 text-xs">(optioneel met toelichting)</span>}
                   </label>
                   <div className={`text-sm font-medium ${getTokenCountColor(totalTokens)}`}>
                     {formatTokenCount(totalTokens)}
@@ -515,9 +545,14 @@ export default function Home() {
                     </svg>
                     <div className="text-sm text-blue-800">
                       <p className="font-medium mb-1">💡 Tip voor betere resultaten:</p>
-                      <p>Als de sectie-structuur niet duidelijk uit de documenten blijkt, geef dan hier de gewenste indeling aan. Bijvoorbeeld:</p>
+                      <p>Je kunt nu ook <strong>zonder documenten</strong> een leeromgeving genereren door alleen onderstaande toelichting in te vullen. Handig voor:</p>
+                      <ul className="list-disc list-inside mt-1 mb-2 text-xs">
+                        <li>Eigen opdrachten zonder bestaande documenten</li>
+                        <li>Specifieke sectie-structuren die je wilt definiëren</li>
+                        <li>Snelle prototyping van leeromgevingen</li>
+                      </ul>
                       <p className="font-mono text-xs mt-2 bg-blue-100 p-2 rounded">
-                        &quot;Maak secties voor: 1. Inleiding, 2. Literatuuronderzoek, 3. Methodologie, 4. Resultaten, 5. Conclusie&quot;
+                        Voorbeeld: &quot;Maak een verslag over duurzaamheid met secties: 1. Inleiding, 2. Probleem analyse, 3. Oplossingen, 4. Conclusie&quot;
                       </p>
                     </div>
                   </div>
@@ -771,6 +806,51 @@ export default function Home() {
                             </div>
                           )}
                         </div>
+
+                        {/* Diagnostic Quiz Strategy */}
+                        <div className="bg-white p-4 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className="font-medium text-gray-800">🧠 Diagnostische Quiz</h4>
+                              <p className="text-sm text-gray-600">
+                                Studenten krijgen kritische vragen over hun eigen geschreven tekst
+                              </p>
+                            </div>
+                            <label className="flex items-center">
+                              <input
+                                type="checkbox"
+                                checked={formativeAssessment.strategies.diagnosticQuiz.enabled}
+                                onChange={(e) => handleStrategyToggle('diagnosticQuiz', e.target.checked)}
+                                className="sr-only"
+                              />
+                              <div className={`relative inline-flex items-center h-5 rounded-full w-9 transition-colors ${
+                                formativeAssessment.strategies.diagnosticQuiz.enabled ? 'bg-purple-500' : 'bg-gray-300'
+                              }`}>
+                                <span className={`inline-block w-3 h-3 transform bg-white rounded-full transition-transform ${
+                                  formativeAssessment.strategies.diagnosticQuiz.enabled ? 'translate-x-5' : 'translate-x-1'
+                                }`} />
+                              </div>
+                            </label>
+                          </div>
+
+                          {formativeAssessment.strategies.diagnosticQuiz.enabled && (
+                            <div className="space-y-3">
+                              <div>
+                                <label htmlFor="quizPrompt" className="block text-sm font-medium text-gray-700 mb-2">
+                                  Aangepaste quiz instructie (optioneel)
+                                </label>
+                                <textarea
+                                  id="quizPrompt"
+                                  rows={2}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                  placeholder="Bijv.: 'Focus op argumentatie en bewijs. Stel kritische vragen over de sterkte van de argumenten...'"
+                                  value={formativeAssessment.strategies.diagnosticQuiz.customPrompt}
+                                  onChange={(e) => handleStrategyUpdate('diagnosticQuiz', { customPrompt: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -782,9 +862,9 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={(e) => handleSubmit(e, 'preview')}
-                  disabled={files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)}
+                  disabled={(files.length === 0 && !additionalInstructions.trim()) || isAnalyzing || !isWithinTokenLimit(totalTokens)}
                   className={`flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all ${
-                    files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)
+                    (files.length === 0 && !additionalInstructions.trim()) || isAnalyzing || !isWithinTokenLimit(totalTokens)
                       ? 'bg-gray-400 cursor-not-allowed'
                       : 'bg-yellow-600 hover:bg-yellow-700 transform hover:scale-105'
                   }`}
@@ -804,9 +884,9 @@ export default function Home() {
 
                 <button
                   type="submit"
-                  disabled={files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)}
+                  disabled={(files.length === 0 && !additionalInstructions.trim()) || isAnalyzing || !isWithinTokenLimit(totalTokens)}
                   className={`flex-1 py-3 px-6 rounded-lg font-semibold text-white transition-all ${
-                    files.length === 0 || isAnalyzing || !isWithinTokenLimit(totalTokens)
+                    (files.length === 0 && !additionalInstructions.trim()) || isAnalyzing || !isWithinTokenLimit(totalTokens)
                       ? 'bg-gray-400 cursor-not-allowed'
                       : 'bg-indigo-600 hover:bg-indigo-700 transform hover:scale-105'
                   }`}
