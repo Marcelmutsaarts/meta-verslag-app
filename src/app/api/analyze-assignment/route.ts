@@ -81,8 +81,6 @@ export async function POST(request: NextRequest) {
           
           // Enhanced PDF parsing with multiple strategies
           const pdfData = await pdfParse(buffer, {
-            // Normalize whitespace
-            normalizeWhitespace: true,
             // Disable image parsing to avoid canvas issues
             max: 0
           })
@@ -281,7 +279,6 @@ Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende 
                 console.log(`Parsing example PDF: ${exampleFile.name}`)
                 const pdfParse = (await import('pdf-parse')).default
                 const pdfData = await pdfParse(buffer, {
-                  normalizeWhitespace: true,
                   max: 0 // Disable image parsing
                 })
                 exampleText = pdfData.text

@@ -267,4 +267,34 @@ The `/api/socratic-chat` endpoint is meta-prompted to:
 - **Performance**: Optimized API calls and reduced unnecessary re-renders
 - **Maintainability**: Improved code structure and documentation
 
+### Enhanced Example Generation System (Latest)
+- **Streamlined UX**: Redesigned Examples Modal with direct action buttons for single-click generation
+- **Automatic Text Placement**: Implemented `handleGenerateAndPlaceExample` function for seamless content integration
+- **Intelligent Content Distribution**: Enhanced API parsing with 3-tier strategy (markdown headers, keyword-based, proportional distribution)
+- **Markdown to HTML Conversion**: Added `convertMarkdownToHtml()` function to convert AI-generated markdown to rich text formatting
+- **Rich Text Integration**: Examples now display with proper bold, italic, headers, and lists in SimpleRichTextEditor
+- **Cross-Section Awareness**: Whole-assignment examples intelligently distributed across all sections with section-specific content matching
+- **Toast Notification System**: Replaced alerts with user-friendly toast notifications for better UX
+- **Helper Functions**: Added text similarity calculations and keyword extraction for improved content parsing
+
+### PDF Upload Stability Improvements (Latest)
+- **Next.js 15 Compatibility**: Updated `next.config.js` with proper webpack configuration for canvas dependencies
+- **Server External Packages**: Configured `serverExternalPackages` for pdf-parse and canvas to prevent build issues
+- **Enhanced PDF Error Handling**: Comprehensive error categorization with user-friendly feedback for:
+  - Canvas/rendering engine problems
+  - Password-protected PDFs
+  - Corrupted or invalid files
+  - Import failures with fallback suggestions
+- **Canvas-Free PDF Parsing**: Added `max: 0` option to disable image rendering and prevent canvas errors
+- **Multi-Strategy Parsing**: Implemented fallback mechanisms with normalized whitespace for better text extraction
+- **Frontend Error Enhancement**: Improved file upload error messages with specific tips per file type
+- **Progressive Error Details**: Structured error feedback with emojis, solutions, and technical details
+- **Webpack Configuration**: Added canvas alias fixes and native module loaders to prevent compilation issues
+
+### Development Configuration Updates
+- **Next.js 15 Migration**: Updated configuration syntax from `experimental.serverComponentsExternalPackages` to `serverExternalPackages`
+- **Webpack Enhancements**: Added ignore-loader for .node files and external package handling
+- **Canvas Dependency Resolution**: Prevented canvas-related build failures with proper aliasing
+- **Development Server Stability**: Improved startup reliability with proper dependency management
+
 When working on this codebase, prioritize the educational methodology - the Socratic principle is fundamental to the application's purpose. Always ensure AI assistance guides through questions rather than providing direct answers.

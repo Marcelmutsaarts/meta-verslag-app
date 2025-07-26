@@ -515,7 +515,7 @@ export default function WorkspacePage() {
     html = html.replace(/^[\s]*[-*]\s+(.+)$/gm, '<li>$1</li>')
     
     // Wrap consecutive list items in ul tags
-    html = html.replace(/(<li>.*<\/li>)/gs, (match) => {
+    html = html.replace(/(<li>.*<\/li>)/g, (match) => {
       if (!match.includes('<ul>')) {
         return `<ul>${match}</ul>`
       }
@@ -526,7 +526,7 @@ export default function WorkspacePage() {
     html = html.replace(/^[\s]*\d+\.\s+(.+)$/gm, '<li>$1</li>')
     
     // Wrap consecutive numbered list items in ol tags
-    html = html.replace(/(<li>.*<\/li>)/gs, (match) => {
+    html = html.replace(/(<li>.*<\/li>)/g, (match) => {
       if (!match.includes('<ol>') && !match.includes('<ul>')) {
         return `<ol>${match}</ol>`
       }

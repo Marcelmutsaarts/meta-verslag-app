@@ -159,7 +159,7 @@ export default function Home() {
         
         // Enhanced error feedback for different file types
         let userFriendlyMessage = `Fout bij het lezen van ${selectedFile.name}`
-        let tips = []
+        let tips: string[] = []
         
         if (selectedFile.type === 'application/pdf') {
           tips = [
@@ -407,7 +407,7 @@ ${tips.map(tip => `• ${tip}`).join('\n')}
       console.error('Full error object:', error)
       
       let errorMessage = 'Onbekende fout'
-      let tips = []
+      let tips: string[] = []
       
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
