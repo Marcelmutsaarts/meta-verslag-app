@@ -62,7 +62,7 @@ npm run netlify-build      # Netlify-specific build command
 - **Left Sidebar**: Compact section navigation with progress indicators, collapsible student info, work management, and formative assessment indicators
 - **Center**: Focus-first writing interface with maximized SimpleRichTextEditor and floating action buttons
 - **Right Panel**: Collapsible Socratic chat assistant with smooth animations
-- **Floating Action Buttons**: Context-aware buttons for learning goals, examples, quiz, help, and focus mode
+- **Floating Action Buttons**: Context-aware buttons for learning goals, examples, quiz, help, theme toggle, and focus mode
 
 ## Environment Configuration
 
@@ -134,7 +134,7 @@ The `/api/socratic-chat` endpoint is meta-prompted to:
 - **Collapsible Sidebars**: Information panels collapse to minimize cognitive load
 - **Floating Action Buttons**: Essential functions accessible via hover-activated buttons with emoji tooltips
 - **Modal-Based Interactions**: Complex features (learning goals, examples) contained in dedicated modals
-- **Focus Mode**: Full-screen writing experience with ESC key exit
+- **Focus Mode**: Full-screen writing experience with dual exit methods (ESC key and visual X button)
 
 ### Enhanced User Experience
 - **Hover Tooltips**: All floating buttons show descriptive tooltips with emoji indicators
@@ -159,6 +159,8 @@ The `/api/socratic-chat` endpoint is meta-prompted to:
 - **Modal System**: Dedicated modals for learning goals, examples, feedback, and help
 - **Socratic Chat**: Collapsible AI assistant panel with smooth animations
 - **Feedback Modal**: In-modal Socratic feedback system with dedicated chatbot interface
+- **ThemeToggle**: Light/dark mode switch integrated into both homepage and workspace floating buttons
+- **Focus Mode Controls**: Visual exit indicators with ESC key instructions and clickable X button
 
 ### Inherited Template Components
 - **TestChatBot**: Advanced multi-modal chat interface
@@ -296,5 +298,38 @@ The `/api/socratic-chat` endpoint is meta-prompted to:
 - **Webpack Enhancements**: Added ignore-loader for .node files and external package handling
 - **Canvas Dependency Resolution**: Prevented canvas-related build failures with proper aliasing
 - **Development Server Stability**: Improved startup reliability with proper dependency management
+
+### Light/Dark Theme System Implementation (Latest)
+- **Global Theme Toggle**: Implemented comprehensive light/dark mode system with CSS custom properties
+- **Startpage Theme Control**: Added theme toggle button on homepage with sun/moon icons and sliding indicator
+- **Workspace Theme Integration**: Integrated theme toggle into floating action buttons for student control
+- **Theme Persistence**: Complete localStorage integration for cross-session theme preferences
+- **CSS Variable Architecture**: Extended design system with light mode color palette:
+  - Inverted foreground/background colors (white backgrounds, dark text in light mode)
+  - Maintained accent colors and semantic color consistency
+  - Theme-aware shadows and visual effects
+- **Component Styling**: Custom CSS overrides for ThemeToggle integration with floating button system
+- **Hydration Safety**: Prevented client/server mismatch with mounted state checks
+- **Visual Consistency**: Ensured theme toggle matches existing design patterns and hover effects
+
+### Focus Mode Enhancement (Latest)
+- **Exit Control Issues**: Resolved confusion where focus mode had no visible exit method
+- **Dual Exit Methods**: Implemented both ESC key and visual exit button for better UX
+- **Exit Control UI**: Added professional exit controls with:
+  - ESC indicator with styled `<kbd>` tag and clear instructions
+  - Floating X button with consistent design system styling
+  - Top-right positioning with proper z-index management
+  - Fade-in animations for smooth visual transitions
+- **Accessibility Improvements**: Enhanced keyboard navigation and screen reader support
+- **Visual Feedback**: Professional styling with backdrop blur, shadows, and hover effects
+
+### Runtime Error Resolution (Latest)
+- **Webpack Bundling Fixes**: Resolved "Cannot find module './548.js'" webpack runtime errors
+- **Cache Management**: Implemented comprehensive cache clearing strategy:
+  - Complete `.next` build directory removal
+  - Node modules cache clearing
+  - Fresh rebuild process for clean dependency resolution
+- **Development Server Stability**: Improved server startup with proper port management
+- **Build Process Enhancement**: Streamlined development workflow with reliable build processes
 
 When working on this codebase, prioritize the educational methodology - the Socratic principle is fundamental to the application's purpose. Always ensure AI assistance guides through questions rather than providing direct answers.

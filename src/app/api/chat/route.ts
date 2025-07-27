@@ -1,8 +1,15 @@
-import { GoogleGenerativeAI, Tool } from '@google/generative-ai'
-import { NextRequest, NextResponse } from 'next/server'
-
-// Initialiseer de Gemini AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
+import { NextRequest } from 'next/server'
+import { 
+  validateGeminiKey, 
+  createErrorResponse, 
+  createSuccessResponse, 
+  safeParseJSON,
+  validateRequestMethod,
+  logApiRequest,
+  validateTextLength
+} from '@/utils/api-helpers'
+import { GeminiService } from '@/services/gemini-service'
+import { validateRequest, ChatRequestSchema, type ChatRequest } from '@/utils/validation-schemas'
 
 // Helper functie om base64 naar buffer te converteren
 function base64ToBuffer(base64: string): Buffer {
@@ -16,51 +23,34 @@ const googleSearchTool = {
 }
 
 export async function POST(request: NextRequest) {
+  logApiRequest('/api/chat', 'POST')
+  
+  // Validate request method
+  const methodError = validateRequestMethod(request, ['POST'])
+  if (methodError) return methodError
+  
+  // Validate Gemini API key
+  const keyError = validateGeminiKey()
+  if (keyError) return keyError
+  
   try {
-    // Betere error handling voor Netlify
-    if (!process.env.GEMINI_API_KEY) {
-      console.error('GEMINI_API_KEY not found in environment variables');
-      return NextResponse.json(
-        { 
-          error: 'API configuratie ontbreekt. Check Netlify Environment Variables.',
-          hint: 'Voeg GEMINI_API_KEY toe in Netlify Site Settings → Environment Variables',
-          debug: 'Environment variable GEMINI_API_KEY is not set'
-        }, 
-        { status: 500 }
-      )
-    }
-
-    // Haal de bericht data op uit de request
-    const body = await request.json()
-    console.log('Received request body:', body)
+    // Parse and validate request body
+    const { data: body, error: parseError } = await safeParseJSON<ChatRequest>(request)
+    if (parseError) return parseError
     
-    const { message, image, images, useGrounding = true, aiModel = 'smart' } = body
-
-    if (!message) {
-      return NextResponse.json(
-        { error: 'Bericht is vereist' },
-        { status: 400 }
-      )
+    const validation = validateRequest(ChatRequestSchema, body)
+    if (!validation.success) {
+      return createErrorResponse(validation.error, validation.details.join(', '), 400)
     }
-
-    // Input validatie en sanitization
-    if (typeof message !== 'string' || message.length > 100000) {
-      return NextResponse.json(
-        { error: 'Bericht moet een string zijn van maximaal 100.000 karakters' },
-        { status: 400 }
-      )
-    }
-
-    // Selecteer het juiste model op basis van aiModel
-    const modelName = aiModel === 'pro' ? 'gemini-2.5-flash-preview-05-20' :
-                     aiModel === 'smart' ? 'gemini-2.5-flash-preview-05-20' :
-                     'gemini-2.5-flash-preview-05-20' // internet
-    const model = genAI.getGenerativeModel({ model: modelName })
-
-    // Configureer tools array - grounding alleen voor Gemini 2.0 (internet model)
-    const tools = (aiModel === 'internet' && useGrounding) ? [googleSearchTool] : []
     
-    let result;
+    const { message, image, images, useGrounding = true } = validation.data
+
+    // Get Gemini service instance
+    const geminiService = GeminiService.getInstance()
+    const model = geminiService.getModel()
+
+    // Configureer tools array - grounding alleen voor specifieke gevallen
+    const tools = useGrounding ? [googleSearchTool] : []
     
     // Helper function to generate content with fallback
     const generateWithFallback = async (requestConfig: any) => {
@@ -77,6 +67,8 @@ export async function POST(request: NextRequest) {
         throw error
       }
     }
+    
+    let result;
     
     if (images && images.length > 0) {
       // Meerdere afbeeldingen - gebruik nieuwe images array
@@ -125,9 +117,8 @@ export async function POST(request: NextRequest) {
     const searchQueries = groundingMetadata?.webSearchQueries || []
     const groundingChuncks = groundingMetadata?.groundingChuncks || []
 
-    return NextResponse.json({ 
+    const responseData = { 
       response: text,
-      success: true,
       grounding: {
         isGrounded: !!groundingMetadata,
         searchQueries: searchQueries,
@@ -137,22 +128,16 @@ export async function POST(request: NextRequest) {
           snippet: chunk.web?.snippet || ''
         }))
       }
-    })
+    }
+
+    return createSuccessResponse(responseData)
 
   } catch (error) {
-    console.error('Fout bij het aanroepen van Gemini API:', error)
+    console.error('Chat API Error:', error)
     
-    // Betere error information voor debugging
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
-    
-    return NextResponse.json(
-      { 
-        error: 'Er is een fout opgetreden bij het verwerken van je bericht',
-        details: errorMessage,
-        timestamp: new Date().toISOString(),
-        hint: 'Check Netlify Function logs voor meer details'
-      },
-      { status: 500 }
+    return createErrorResponse(
+      'Er is een fout opgetreden bij het verwerken van je bericht',
+      error instanceof Error ? error.message : 'Unknown error'
     )
   }
 } 

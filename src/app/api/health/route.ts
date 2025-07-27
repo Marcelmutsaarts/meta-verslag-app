@@ -1,20 +1,25 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { createSuccessResponse, createErrorResponse, logApiRequest } from '@/utils/api-helpers'
+import { GeminiService } from '@/services/gemini-service'
 
 export async function GET(request: NextRequest) {
+  logApiRequest('/api/health', 'GET')
+  
   try {
-    const hasGeminiKey = !!process.env.GEMINI_API_KEY
-    const keyLength = process.env.GEMINI_API_KEY?.length || 0
+    const geminiService = GeminiService.getInstance()
+    const keyStatus = geminiService.getKeyStatus()
     
-    return NextResponse.json({
-      status: 'ok',
-      geminiKeyConfigured: hasGeminiKey,
-      geminiKeyLength: keyLength,
-      timestamp: new Date().toISOString()
-    })
+    const healthData = {
+      status: 'healthy' as const,
+      geminiConfigured: keyStatus.configured,
+      version: process.env.npm_package_version || '0.1.0'
+    }
+    
+    return createSuccessResponse(healthData)
   } catch (error) {
-    return NextResponse.json({
-      status: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 })
+    return createErrorResponse(
+      'Health check failed',
+      error instanceof Error ? error.message : 'Unknown error'
+    )
   }
 }
