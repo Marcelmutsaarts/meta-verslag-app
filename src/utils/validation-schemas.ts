@@ -77,9 +77,9 @@ export const SocraticChatRequestSchema = z.object({
     instructions: z.string().optional()
   }),
   studentContext: z.object({
-    sectionContents: z.record(z.string()),
+    sectionContents: z.record(z.string(), z.string()),
     learningGoals: z.object({
-      sections: z.record(z.object({
+      sections: z.record(z.string(), z.object({
         content: z.string(),
         status: z.enum(['draft', 'final']),
         updatedAt: z.string()
@@ -91,11 +91,11 @@ export const SocraticChatRequestSchema = z.object({
       }).optional()
     }),
     examples: z.object({
-      data: z.record(z.object({
+      data: z.record(z.string(), z.object({
         content: z.string(),
         generatedAt: z.string()
       })),
-      reflections: z.record(z.string())
+      reflections: z.record(z.string(), z.string())
     })
   }).optional(),
   metadata: MetadataSchema.optional()
@@ -171,7 +171,7 @@ export function validateRequest<T>(
       return {
         success: false,
         error: 'Validation failed',
-        details: error.errors.map(err => `${err.path.join('.')}: ${err.message}`)
+        details: error.issues.map(err => `${err.path.join('.')}: ${err.message}`)
       }
     }
     return {
