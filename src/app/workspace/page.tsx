@@ -59,6 +59,7 @@ export default function WorkspacePage() {
   const [showExampleModal, setShowExampleModal] = useState<string | null>(null)
   const [showGuideModal, setShowGuideModal] = useState(false)
   const [showQuizModal, setShowQuizModal] = useState(false)
+  const [exampleContext, setExampleContext] = useState('')
   const [quizMessages, setQuizMessages] = useState<ChatMessage[]>([])
   const [quizInput, setQuizInput] = useState('')
   const [quizTyping, setQuizTyping] = useState(false)
@@ -410,7 +411,17 @@ export default function WorkspacePage() {
       // Generate the example using the existing API call logic
       const isWholeAssignment = scope === 'whole-assignment'
       const currentSection = !isWholeAssignment ? assignmentData.sections.find((s: any) => s.id === selectedSection) : null
-      const contextPrompt = assignmentData.metadata?.formativeAssessment?.strategies?.exampleBasedLearning?.customReflectionQuestions || ''
+      const teacherContext = assignmentData.metadata?.formativeAssessment?.strategies?.exampleBasedLearning?.customReflectionQuestions || ''
+      
+      // Combine teacher context and student context
+      let combinedContext = ''
+      if (teacherContext) {
+        combinedContext += `Docent context: ${teacherContext}`
+      }
+      if (exampleContext.trim()) {
+        if (combinedContext) combinedContext += '\n\n'
+        combinedContext += `Student context: ${exampleContext.trim()}`
+      }
       
       const requestBody = {
         scope: isWholeAssignment ? 'all-sections' : 'current-section',
@@ -430,7 +441,7 @@ export default function WorkspacePage() {
         },
         metadata: assignmentData.metadata,
         formativeAssessment: assignmentData.metadata?.formativeAssessment,
-        customContext: contextPrompt
+        customContext: combinedContext
       }
       
       console.log('Sending request to /api/generate-example...')
@@ -458,6 +469,7 @@ export default function WorkspacePage() {
         
         // Close the modal after successful placement
         setShowExampleModal(null)
+        setExampleContext('')
         
         // Show success message
         showToast(
@@ -1177,13 +1189,17 @@ export default function WorkspacePage() {
     }
   }
 
-  if (!assignmentData) {
+  if (!assignmentData || !assignmentData.sections || !Array.isArray(assignmentData.sections)) {
+    console.error('Invalid assignment data structure:', assignmentData)
     return (
       <div className="min-h-screen flex items-center justify-center bg-primary">
         <div className="text-center">
           <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-accent mx-auto mb-4"></div>
           <h2 className="text-heading text-xl font-semibold mb-2">Leeromgeving laden...</h2>
           <p className="text-muted">Even geduld, we bereiden je workspace voor.</p>
+          {assignmentData && !assignmentData.sections && (
+            <p className="text-red-500 mt-4">⚠️ Ongeldige data structuur. Probeer opnieuw.</p>
+          )}
         </div>
       </div>
     )
@@ -1825,12 +1841,12 @@ export default function WorkspacePage() {
 
       {/* Examples Modal */}
       {showExampleModal && (
-        <div className="modal-overlay" onClick={() => setShowExampleModal(null)}>
+        <div className="modal-overlay" onClick={() => { setShowExampleModal(null); setExampleContext('') }}>
           <div className="modal-content w-full max-w-4xl p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-heading text-xl font-semibold">📝 Voorbeelden Genereren</h3>
               <button
-                onClick={() => setShowExampleModal(null)}
+                onClick={() => { setShowExampleModal(null); setExampleContext('') }}
                 className="text-muted hover:text-heading transition-colors"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1843,6 +1859,31 @@ export default function WorkspacePage() {
               <p className="text-muted text-center">
                 Kies wat voor voorbeeld je wilt genereren. Het voorbeeld wordt automatisch op de juiste plek geplaatst.
               </p>
+
+              {/* Context Input Section */}
+              <div className="p-4 bg-card rounded-lg border border-accent">
+                <label htmlFor="exampleContext" className="block text-sm font-medium text-heading mb-2">
+                  💭 Extra Context (Optioneel)
+                </label>
+                <textarea
+                  id="exampleContext"
+                  value={exampleContext}
+                  onChange={(e) => setExampleContext(e.target.value)}
+                  placeholder="Geef extra context voor het voorbeeld... Bijvoorbeeld: 'Focus op praktijkvoorbeelden uit de zorg' of 'Gebruik voorbeelden die aansluiten bij het MBO niveau'"
+                  className="w-full h-24 p-3 border border-muted rounded-lg resize-none text-sm
+                           focus:ring-2 focus:ring-accent focus:border-transparent
+                           bg-background text-body placeholder-muted"
+                  maxLength={500}
+                />
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-xs text-muted">
+                    Deze context helpt de AI om meer relevante voorbeelden te maken
+                  </span>
+                  <span className="text-xs text-muted">
+                    {exampleContext.length}/500
+                  </span>
+                </div>
+              </div>
 
               {/* Direct Action Buttons */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1928,6 +1969,7 @@ export default function WorkspacePage() {
                     <ul className="text-sm text-muted space-y-1">
                       <li>• <strong>Huidige Sectie:</strong> Genereert tekst die direct in je huidige sectie wordt geplaatst</li>
                       <li>• <strong>Hele Opdracht:</strong> Genereert een compleet voorbeeld dat automatisch over alle secties wordt verdeeld</li>
+                      <li>• <strong>Extra Context:</strong> Geef specifieke wensen mee zoals 'focus op praktijk' of 'gebruik eenvoudige taal'</li>
                       <li>• <strong>Bestaande tekst:</strong> Wordt vervangen door het nieuwe voorbeeld</li>
                       <li>• <strong>Aanpassen:</strong> Je kunt het geplaatste voorbeeld achteraf nog bewerken</li>
                     </ul>

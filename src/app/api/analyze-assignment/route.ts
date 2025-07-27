@@ -1,26 +1,29 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { NextRequest } from 'next/server'
 import mammoth from 'mammoth'
+import { 
+  validateGeminiKey, 
+  createErrorResponse, 
+  createSuccessResponse,
+  logApiRequest,
+  validateRequestMethod
+} from '@/utils/api-helpers'
+import { GeminiService } from '@/services/gemini-service'
 
 export async function POST(request: NextRequest) {
-  console.log('=== ANALYZE ASSIGNMENT API CALLED ===')
-  console.log('Request method:', request.method)
-  console.log('Request URL:', request.url)
-  console.log('Timestamp:', new Date().toISOString())
+  logApiRequest('/api/analyze-assignment', 'POST')
+  
+  // Validate request method
+  const methodError = validateRequestMethod(request, ['POST'])
+  if (methodError) return methodError
+  
+  // Validate Gemini API key
+  const keyError = validateGeminiKey()
+  if (keyError) return keyError
   
   try {
-    // Check if API key exists
-    if (!process.env.GEMINI_API_KEY) {
-      console.error('GEMINI_API_KEY is not set in environment variables')
-      return NextResponse.json({ 
-        error: 'API configuratie fout. Controleer de environment variabelen.',
-        details: 'GEMINI_API_KEY ontbreekt'
-      }, { status: 500 })
-    }
-    
     console.log('API key check passed')
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+    const geminiService = GeminiService.getInstance()
     
     console.log('Parsing form data...')
     const formData = await request.formData()
@@ -44,7 +47,7 @@ export async function POST(request: NextRequest) {
     console.log('- exampleFileCount:', exampleFileCount)
 
     if (fileCount === 0 && !instructions?.trim()) {
-      return NextResponse.json({ error: 'Geen bestanden geüpload en geen toelichting gegeven' }, { status: 400 })
+      return createErrorResponse('Geen bestanden geüpload en geen toelichting gegeven', undefined, 400)
     }
 
     // Extract text from all documents
@@ -73,10 +76,11 @@ export async function POST(request: NextRequest) {
             pdfParse = (await import('pdf-parse')).default
           } catch (importError) {
             console.error('Failed to import pdf-parse:', importError)
-            return NextResponse.json({ 
-              error: `PDF parsing library niet beschikbaar`,
-              details: `Er is een probleem met de PDF verwerkings-library. Probeer het document als Word (.docx) of tekst (.txt) bestand te uploaden.`
-            }, { status: 500 })
+            return createErrorResponse(
+              `PDF parsing library niet beschikbaar`,
+              `Er is een probleem met de PDF verwerkings-library. Probeer het document als Word (.docx) of tekst (.txt) bestand te uploaden.`,
+              500
+            )
           }
           
           // Enhanced PDF parsing with multiple strategies
@@ -105,15 +109,16 @@ export async function POST(request: NextRequest) {
           // Final validation
           if (!documentText || documentText.trim().length < 10) {
             console.warn(`PDF ${file.name} extraction unsuccessful. Content length: ${documentText?.length || 0}`)
-            return NextResponse.json({ 
-              error: `Geen tekst gevonden in PDF bestand: ${file.name}`,
-              details: `Het PDF bestand bevat mogelijk alleen afbeeldingen, is wachtwoord-beveiligd, of heeft een complex formaat. Probeer:
+            return createErrorResponse(
+              `Geen tekst gevonden in PDF bestand: ${file.name}`,
+              `Het PDF bestand bevat mogelijk alleen afbeeldingen, is wachtwoord-beveiligd, of heeft een complex formaat. Probeer:
               
 • Het bestand te converteren naar Word (.docx) of tekst (.txt)
 • Een andere PDF viewer/generator te gebruiken
 • Te controleren of het bestand niet beschadigd is
-• Het bestand opnieuw op te slaan als PDF`
-            }, { status: 400 })
+• Het bestand opnieuw op te slaan als PDF`,
+              400
+            )
           }
           
           console.log(`PDF parsing successful for ${file.name}: ${documentText.length} characters extracted`)
@@ -152,10 +157,7 @@ Probeer:
 Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende fout'}`
           }
           
-          return NextResponse.json({ 
-            error: userMessage,
-            details: userDetails
-          }, { status: 400 })
+          return createErrorResponse(userMessage, userDetails, 400)
         }
       } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         try {
@@ -190,10 +192,11 @@ Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende 
             fileName: file.name,
             fileSize: file.size
           })
-          return NextResponse.json({ 
-            error: `Fout bij het lezen van Word bestand: ${file.name}`,
-            details: `Het Word bestand kan mogelijk beschadigd zijn of een ongewoon formaat hebben. Details: ${wordError instanceof Error ? wordError.message : 'Onbekende fout'}`
-          }, { status: 400 })
+          return createErrorResponse(
+            `Fout bij het lezen van Word bestand: ${file.name}`,
+            `Het Word bestand kan mogelijk beschadigd zijn of een ongewoon formaat hebben. Details: ${wordError instanceof Error ? wordError.message : 'Onbekende fout'}`,
+            400
+          )
         }
       } else if (file.type === 'text/plain') {
         // Improved text file handling
@@ -207,10 +210,11 @@ Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende 
           }
         } catch (textError) {
           console.error('Text file parsing error:', textError)
-          return NextResponse.json({ 
-            error: `Fout bij het lezen van tekst bestand: ${file.name}`,
-            details: 'Het bestand kan mogelijk een onondersteunde encoding hebben.'
-          }, { status: 400 })
+          return createErrorResponse(
+            `Fout bij het lezen van tekst bestand: ${file.name}`,
+            'Het bestand kan mogelijk een onondersteunde encoding hebben.',
+            400
+          )
         }
       } else {
         // Improved fallback with better error messages
@@ -224,10 +228,11 @@ Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende 
           }
         } catch (fallbackError) {
           console.error('Fallback text extraction failed:', fallbackError)
-          return NextResponse.json({ 
-            error: `Onbekend of onondersteund bestandsformaat voor ${file.name}`,
-            details: 'Ondersteunde formaten: PDF (.pdf), Word (.docx), en Tekst (.txt). Controleer of het bestand niet beschadigd is.'
-          }, { status: 400 })
+          return createErrorResponse(
+            `Onbekend of onondersteund bestandsformaat voor ${file.name}`,
+            'Ondersteunde formaten: PDF (.pdf), Word (.docx), en Tekst (.txt). Controleer of het bestand niet beschadigd is.',
+            400
+          )
         }
       }
 
@@ -245,7 +250,7 @@ Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende 
     }
 
     if (documents.length === 0 && !instructions?.trim()) {
-      return NextResponse.json({ error: 'Geen bruikbare tekstinhoud gevonden in de geüploade bestanden en geen toelichting gegeven' }, { status: 400 })
+      return createErrorResponse('Geen bruikbare tekstinhoud gevonden in de geüploade bestanden en geen toelichting gegeven', undefined, 400)
     }
 
     console.log(`Processed ${documents.length} documents with total text length: ${totalTextLength}`)
@@ -324,7 +329,7 @@ Technische details: ${pdfError instanceof Error ? pdfError.message : 'Onbekende 
     }
 
     // Analyze the document with Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-preview-05-20' })
+    const model = geminiService.getModel()
 
     // Get education level details
     const levelMap: Record<string, { name: string; ageRange: string; complexity: string }> = {
@@ -630,19 +635,17 @@ Zorg ervoor dat:
     console.log('Response data title:', responseData.title)
     console.log('Sending successful response...')
     
-    return NextResponse.json(responseData)
+    return createSuccessResponse(responseData)
   } catch (error) {
     console.error('Error analyzing assignment:', error)
     console.error('Error details:', {
       message: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : 'No stack trace'
     })
-    return NextResponse.json(
-      { 
-        error: 'Er ging iets mis bij het analyseren van de opdracht',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
+    return createErrorResponse(
+      'Er ging iets mis bij het analyseren van de opdracht',
+      error instanceof Error ? error.message : 'Unknown error',
+      500
     )
   }
 }

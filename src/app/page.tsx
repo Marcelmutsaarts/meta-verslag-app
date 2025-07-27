@@ -342,8 +342,12 @@ ${tips.map(tip => `• ${tip}`).join('\n')}
       }
 
       if (response.ok) {
-        const data = await response.json()
-        console.log('Received data:', data)
+        const responseData = await response.json()
+        console.log('Received response:', responseData)
+        
+        // Extract the actual data from the standardized response
+        const data = responseData.data || responseData
+        console.log('Extracted data:', data)
         
         if (mode === 'preview') {
           console.log('Storing preview data in sessionStorage...')
