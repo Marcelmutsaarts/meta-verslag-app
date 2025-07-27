@@ -6,6 +6,7 @@ import SimpleRichTextEditor from '@/components/SimpleRichTextEditor'
 import StudentLogin from '@/components/StudentLogin'
 import WorkImport from '@/components/WorkImport'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
+import ThemeToggle from '@/components/ThemeToggle'
 import { exportAssignmentToWord, exportAssignmentToPDF } from '@/utils/exportUtils'
 
 // Types
@@ -1496,6 +1497,15 @@ export default function WorkspacePage() {
             </svg>
           </button>
 
+          {/* Theme Toggle Button */}
+          <div 
+            className="floating-btn-wrapper"
+            onMouseEnter={(e) => showTooltip(e, "🌙 Thema - Schakel tussen licht en donker uiterlijk")}
+            onMouseLeave={hideTooltip}
+          >
+            <ThemeToggle />
+          </div>
+
           {/* Focus Mode Button */}
           <button
             className={`floating-btn ${focusMode ? 'bg-accent-soft' : ''}`}
@@ -1515,6 +1525,24 @@ export default function WorkspacePage() {
           </button>
         </div>
       </div>
+
+      {/* Focus Mode Exit Controls - Only visible in focus mode */}
+      {focusMode && (
+        <div className="focus-mode-exit-controls">
+          <div className="focus-mode-esc-indicator">
+            <span>Druk <kbd>ESC</kbd> om te verlaten</span>
+          </div>
+          <button
+            onClick={() => setFocusMode(false)}
+            className="focus-mode-exit-btn"
+            title="Focus modus verlaten"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Right - Collapsible Chat */}
       <div className={`chat-panel transition-all duration-300 ${isChatOpen ? 'w-96' : 'w-12'} relative`}>

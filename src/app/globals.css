@@ -5,7 +5,7 @@
 
 /* Purple Hacker Academic Design System */
 :root {
-  /* Color Palette */
+  /* Color Palette - Dark Mode (default) */
   --accent: #A25DF8;
   --accent-soft: #C38FFF;
   --accent-dark: #8A4AE8;
@@ -14,6 +14,12 @@
   --bg-primary: #000000;
   --bg-card: #010101;
   --bg-card-hover: #0A0A0A;
+  
+  /* Semantic Colors */
+  --color-error: #ef4444;
+  --color-success: #22c55e;  
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
   
   /* Typography */
   --font-heading: 'Poppins', sans-serif;
@@ -35,6 +41,25 @@
   --glow-purple: 0 0 20px rgba(162, 93, 248, 0.3);
   --glow-purple-intense: 0 0 30px rgba(162, 93, 248, 0.5);
   --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Light Mode Theme */
+[data-theme="light"] {
+  /* Inverted Color Palette */
+  --fg-base: #1a1a1a;        /* Dark text on light background */
+  --fg-muted: #6b7280;       /* Muted dark text */
+  --bg-primary: #ffffff;     /* White background */
+  --bg-card: #f9fafb;        /* Light gray cards */
+  --bg-card-hover: #f3f4f6;  /* Slightly darker on hover */
+  
+  /* Semantic Colors - Light Mode Variants */
+  --color-error: #dc2626;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+  
+  /* Shadows adjusted for light mode */
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
 /* Base Styles Override */
@@ -72,6 +97,14 @@ body {
   
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+/* Light mode body adjustments */
+[data-theme="light"] body {
+  /* Light mode scan-lines texture */
+  background-image: 
+    linear-gradient(rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 4px),
+    radial-gradient(circle at center, transparent 0%, #ffffff 70%);
 }
 
 /* WYSIWYG Editor Styles - Purple Hacker Theme */
@@ -750,6 +783,80 @@ body {
   box-shadow: 0 4px 12px rgba(162, 93, 248, 0.2);
 }
 
+/* Theme Toggle Integration with Floating Buttons */
+.floating-btn-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Override ThemeToggle styling to match floating buttons */
+.floating-btn-wrapper button {
+  width: 52px !important;
+  height: 52px !important;
+  border-radius: 50% !important;
+  background: var(--bg-card) !important;
+  border: 2px solid var(--accent) !important;
+  color: var(--accent) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.2s ease !important;
+  backdrop-filter: blur(8px) !important;
+  box-shadow: 0 4px 12px rgba(162, 93, 248, 0.2) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.floating-btn-wrapper button:hover {
+  background: var(--accent-soft) !important;
+  border-color: var(--accent-bright) !important;
+  color: var(--accent-bright) !important;
+  transform: translateY(-3px) scale(1.05) !important;
+  box-shadow: 0 6px 20px rgba(162, 93, 248, 0.4) !important;
+}
+
+.floating-btn-wrapper button:active {
+  transform: translateY(-1px) scale(1.02) !important;
+}
+
+/* Hide the internal sliding indicator and adjust layout */
+.floating-btn-wrapper button > div:last-child {
+  display: none !important;
+}
+
+.floating-btn-wrapper button > div:first-child {
+  padding: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  justify-content: center !important;
+  align-items: center !important;
+  gap: 0 !important;
+  position: relative !important;
+}
+
+/* Show only the active theme icon */
+.floating-btn-wrapper button svg {
+  width: 24px !important;
+  height: 24px !important;
+  margin: 0 !important;
+  position: absolute !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+/* Hide inactive icon, show active one */
+.floating-btn-wrapper button svg:first-child {
+  opacity: var(--theme-sun-opacity, 0) !important;
+}
+
+.floating-btn-wrapper button svg:last-child {
+  opacity: var(--theme-moon-opacity, 1) !important;
+}
+
 /* Floating Button Tooltips - Gegarandeerd Zichtbaar */
 .floating-btn {
   position: relative;
@@ -1070,6 +1177,81 @@ body {
   border: none !important;
 }
 
+/* Focus Mode Exit Controls */
+.focus-mode-exit-controls {
+  position: fixed;
+  top: var(--space-md);
+  right: var(--space-md);
+  z-index: 1001;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.focus-mode-esc-indicator {
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: focus-mode-fade-in 0.3s ease-out;
+}
+
+.focus-mode-esc-indicator kbd {
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--accent);
+  margin: 0 2px;
+}
+
+.focus-mode-exit-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 2px solid var(--accent);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 12px rgba(162, 93, 248, 0.2);
+  animation: focus-mode-fade-in 0.3s ease-out;
+}
+
+.focus-mode-exit-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-bright);
+  color: var(--accent-bright);
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(162, 93, 248, 0.4);
+}
+
+.focus-mode-exit-btn:active {
+  transform: scale(0.98);
+}
+
+/* Fade-in animation for focus mode controls */
+@keyframes focus-mode-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Rich Text Editor Enhancements */
 .workspace-editor {
   min-height: 60vh;
@@ -1139,5 +1321,147 @@ body {
     flex-direction: column;
     bottom: var(--space-md);
     right: var(--space-sm);
+  }
+}
+
+/* ==============================
+   THEME-AWARE UTILITY CLASSES
+   ============================== */
+
+/* Text Colors */
+.text-error {
+  color: var(--color-error);
+}
+
+.text-success {
+  color: var(--color-success);
+}
+
+.text-warning {
+  color: var(--color-warning);
+}
+
+.text-info {
+  color: var(--color-info);
+}
+
+/* Background Colors */
+.bg-warning {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: var(--color-warning);
+}
+
+[data-theme="light"] .bg-warning {
+  background-color: rgba(217, 119, 6, 0.1);
+  border-color: var(--color-warning);
+}
+
+.bg-info {
+  background-color: rgba(59, 130, 246, 0.1);
+  border-color: var(--color-info);
+}
+
+[data-theme="light"] .bg-info {
+  background-color: rgba(37, 99, 235, 0.1);
+  border-color: var(--color-info);
+}
+
+/* Border Colors */
+.border-warning {
+  border-color: var(--color-warning);
+}
+
+.border-info {
+  border-color: var(--color-info);
+}
+
+.border-accent {
+  border-color: var(--accent);
+}
+
+/* Text Accent Color */
+.text-accent {
+  color: var(--accent);
+}
+
+/* Card Secondary Variant */
+.card-secondary {
+  background-color: var(--bg-card);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(162, 93, 248, 0.2);
+  transition: all 0.3s ease;
+}
+
+.card-secondary:hover {
+  background-color: var(--bg-card-hover);
+  border-color: rgba(162, 93, 248, 0.3);
+}
+
+/* Theme Toggle Styles */
+.theme-toggle {
+  position: fixed;
+  top: var(--space-lg);
+  right: var(--space-lg);
+  z-index: 100;
+  background: var(--bg-card);
+  border: 2px solid var(--accent);
+  border-radius: 50px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(162, 93, 248, 0.2);
+  backdrop-filter: blur(8px);
+}
+
+.theme-toggle:hover {
+  background: var(--bg-card-hover);
+  box-shadow: var(--glow-purple);
+  transform: translateY(-2px);
+}
+
+.theme-toggle-icon {
+  width: 20px;
+  height: 20px;
+  transition: all 0.3s ease;
+  color: var(--accent);
+}
+
+.theme-toggle-icon.active {
+  color: var(--accent-soft);
+  transform: scale(1.1);
+}
+
+.theme-toggle-icon.inactive {
+  opacity: 0.5;
+  transform: scale(0.9);
+}
+
+/* Responsive adjustments for theme toggle */
+@media (max-width: 768px) {
+  .theme-toggle {
+    top: var(--space-md);
+    right: var(--space-md);
+    padding: 6px 10px;
+  }
+  
+  .theme-toggle-icon {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .theme-toggle {
+    top: var(--space-sm);
+    right: var(--space-sm);
+    padding: 4px 8px;
+  }
+  
+  .theme-toggle-icon {
+    width: 16px;
+    height: 16px;
   }
 }

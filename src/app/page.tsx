@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { estimateTokens, formatTokenCount, getTokenCountColor, isWithinTokenLimit } from '@/utils/tokenCounter'
+import ThemeToggle from '@/components/ThemeToggle'
 
 const educationLevels = [
   { value: 'PO', label: 'Primair Onderwijs (PO)', description: 'Basisschool, groep 1-8' },
@@ -506,6 +507,9 @@ ${tips.map(tip => `• ${tip}`).join('\n')}
       <div className="grid-main py-xl">
         {/* Hero Section */}
         <div className="text-center mb-xl animate-fade-in-up">
+          <div className="flex justify-end mb-4">
+            <ThemeToggle />
+          </div>
           <h1 className="text-hero mb-md">
             META-VERSLAG-APP
           </h1>

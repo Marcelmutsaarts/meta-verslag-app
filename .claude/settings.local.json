@@ -26,7 +26,8 @@
       "Bash(taskkill:*)",
       "Bash(cmd /c:*)",
       "Bash(start http://localhost:3001/workspace)",
-      "Bash(start http://localhost:3001/)"
+      "Bash(start http://localhost:3001/)",
+      "Bash(git restore:*)"
     ],
     "deny": []
   }
